@@ -1,4 +1,4 @@
-# Reg-Gate
+# <img src="docs/icon.svg" width="36" height="36" alt="" align="top"> Reg-Gate
 
 [![CI](https://github.com/nctrnlsoul/reg-gate/actions/workflows/ci.yml/badge.svg)](https://github.com/nctrnlsoul/reg-gate/actions/workflows/ci.yml)
 

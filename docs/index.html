@@ -4,183 +4,221 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Reg-Gate</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%234392E6'/%3E%3Cpath d='M12 4.5l5.5 2.3v3.9c0 3.5-2.3 6.4-5.5 7.8-3.2-1.4-5.5-4.3-5.5-7.8V6.8L12 4.5z' fill='none' stroke='white' stroke-width='1.8'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22%3E%3Crect width=%2264%22 height=%2264%22 rx=%2216%22 fill=%22%230055FD%22/%3E%3Crect x=%2213%22 y=%2220%22 width=%229%22 height=%2232%22 rx=%224.5%22 fill=%22%23fff%22/%3E%3Crect x=%2210%22 y=%2248%22 width=%2215%22 height=%225%22 rx=%222.5%22 fill=%22%23fff%22/%3E%3Cg transform=%22rotate(-26 17.5 26)%22%3E%3Crect x=%2215%22 y=%2221%22 width=%2240%22 height=%2210%22 rx=%225%22 fill=%22%23fff%22/%3E%3Crect x=%2228%22 y=%2221%22 width=%225.5%22 height=%2210%22 fill=%22%230055FD%22/%3E%3Crect x=%2241%22 y=%2221%22 width=%225.5%22 height=%2210%22 fill=%22%230055FD%22/%3E%3C/g%3E%3C/svg%3E">
 <meta name="description" content="Live on-chain regulatory status for tokenized assets, written by a Chainlink CRE workflow from U.S. Federal Register publications.">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self' https: http://127.0.0.1:8545 http://localhost:8545; img-src 'self' data:; base-uri 'none'; form-action 'none'">
 <style>
+  /* Primitives */
   :root {
-    --bg: #f6f7f9; --surface: #ffffff; --ink: #14181f; --muted: #5b6472; --line: #e3e6eb;
-    --accent: #4392E6; --accent-ink: #1f5fa8;
-    --ok: #127a43; --ok-bg: #e5f5ec; --review: #8a5a00; --review-bg: #fdf1d6;
-    --block: #b42318; --block-bg: #fde8e6; --unknown: #4b5563; --unknown-bg: #eceef1;
-    --radius: 14px; --shadow: 0 1px 2px rgba(16,24,40,.05), 0 1px 3px rgba(16,24,40,.06);
+    --p-ink: #161C24; --p-paper: #F3F6F9; --p-white: #FFFFFF; --p-slate: #55606E; --p-mist: #D5DCE4;
+    --p-blue: #0055FD;
+    --p-green: #0B7A4B; --p-amber: #8A5A00; --p-red: #C42B21;
+    --p-green-t: #E3F3EA; --p-amber-t: #FAEFD7; --p-red-t: #FBE6E4; --p-slate-t: #E9EDF2;
+  }
+  /* Semantic tokens, light */
+  :root {
+    --bg: var(--p-paper); --panel: var(--p-white); --ink: var(--p-ink); --muted: var(--p-slate); --line: var(--p-mist);
+    --link: var(--p-blue); --focus: var(--p-blue);
+    --ok: var(--p-green); --review: var(--p-amber); --block: var(--p-red); --unknown: var(--p-slate);
+    --ok-t: var(--p-green-t); --review-t: var(--p-amber-t); --block-t: var(--p-red-t); --unknown-t: var(--p-slate-t);
+    --mark: var(--p-blue);
     color-scheme: light;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
-      --bg: #0d1117; --surface: #151b23; --ink: #e6e9ee; --muted: #9aa4b2; --line: #262e39;
-      --accent: #4392E6; --accent-ink: #8cbcf2;
-      --ok: #4ade80; --ok-bg: #0f2a1b; --review: #fbbf24; --review-bg: #2d2309;
-      --block: #f87171; --block-bg: #2e1312; --unknown: #a8b0bd; --unknown-bg: #1f2630;
-      --shadow: none; color-scheme: dark;
+      --bg: #161C24; --panel: #1C2430; --ink: #E7EDF3; --muted: #9BA7B5; --line: #2E3946;
+      --link: #8AB0FF; --focus: #8AB0FF;
+      --ok: #3ED598; --review: #F2BB4F; --block: #FF6B70; --unknown: #9BA7B5;
+      --ok-t: #14301F; --review-t: #352A10; --block-t: #3B1C1E; --unknown-t: #263040;
+      color-scheme: dark;
     }
   }
   :root[data-theme="dark"] {
-    --bg: #0d1117; --surface: #151b23; --ink: #e6e9ee; --muted: #9aa4b2; --line: #262e39;
-    --accent: #4392E6; --accent-ink: #8cbcf2;
-    --ok: #4ade80; --ok-bg: #0f2a1b; --review: #fbbf24; --review-bg: #2d2309;
-    --block: #f87171; --block-bg: #2e1312; --unknown: #a8b0bd; --unknown-bg: #1f2630;
-    --shadow: none; color-scheme: dark;
+    --bg: #161C24; --panel: #1C2430; --ink: #E7EDF3; --muted: #9BA7B5; --line: #2E3946;
+    --link: #8AB0FF; --focus: #8AB0FF;
+    --ok: #3ED598; --review: #F2BB4F; --block: #FF6B70; --unknown: #9BA7B5;
+    --ok-t: #14301F; --review-t: #352A10; --block-t: #3B1C1E; --unknown-t: #263040;
+    color-scheme: dark;
   }
+
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
+  html { -webkit-text-size-adjust: 100%; }
   body { margin: 0; background: var(--bg); color: var(--ink);
-    font: 16px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
-  .wrap { max-width: 1040px; margin: 0 auto; padding: 32px 16px 48px; }
-  header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
-  .brand { display: flex; align-items: center; gap: 12px; }
-  .mark { width: 36px; height: 36px; border-radius: 10px; background: var(--accent); display: grid; place-items: center; flex: none; }
-  .mark svg { width: 20px; height: 20px; }
-  h1 { font-size: 26px; line-height: 1.1; margin: 0; letter-spacing: -.01em; }
-  .tag { color: var(--muted); margin: 6px 0 0; max-width: 620px; }
-  .pill { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; padding: 5px 10px;
-    border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); white-space: nowrap; }
-  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
-  .dot.live { background: var(--ok); }
-  .banner { margin: 24px 0 0; padding: 14px 16px; border-radius: var(--radius); border: 1px solid var(--line);
-    background: var(--surface); display: flex; gap: 12px; align-items: center; flex-wrap: wrap; box-shadow: var(--shadow); }
-  .banner strong { font-weight: 650; }
-  .banner.warn { border-color: transparent; background: var(--block-bg); color: var(--block); }
-  .banner.info { border-color: transparent; background: var(--unknown-bg); color: var(--unknown); }
-  .fresh { display: flex; gap: 8px 24px; flex-wrap: wrap; color: var(--muted); font-size: 14px; }
-  .fresh b { color: var(--ink); font-weight: 600; }
-  .fresh a { color: var(--accent-ink); text-decoration: none; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
-  .fresh a:hover { text-decoration: underline; }
-  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 36px 0 12px; font-weight: 650; }
-  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
-  @media (max-width: 720px) { .grid { grid-template-columns: 1fr; } }
-  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; box-shadow: var(--shadow);
-    display: flex; flex-direction: column; gap: 10px; min-width: 0; }
-  .card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
-  .card h3 { margin: 0; font-size: 17px; }
-  .card p { margin: 0; color: var(--muted); font-size: 14px; }
-  .chip { font-size: 13px; font-weight: 700; letter-spacing: .04em; padding: 6px 11px; border-radius: 8px; white-space: nowrap; }
-  .chip.OK { color: var(--ok); background: var(--ok-bg); }
-  .chip.REVIEW { color: var(--review); background: var(--review-bg); }
-  .chip.BLOCK { color: var(--block); background: var(--block-bg); }
-  .chip.UNKNOWN { color: var(--unknown); background: var(--unknown-bg); }
-  .meta { display: flex; gap: 8px; flex-wrap: wrap; font-size: 13px; color: var(--muted); align-items: center; }
-  .meta a { color: var(--accent-ink); text-decoration: none; font-weight: 600; overflow-wrap: anywhere; }
-  .meta a:hover { text-decoration: underline; }
-  .badge { font-size: 12px; font-weight: 650; padding: 2px 8px; border-radius: 6px; background: var(--block-bg); color: var(--block); }
-  .tok-name { font-weight: 650; }
-  .tok-sub { color: var(--muted); font-size: 13px; }
-  .steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
-  @media (max-width: 960px) { .steps { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-  @media (max-width: 560px) { .steps { grid-template-columns: 1fr; } }
-  .step .n { width: 26px; height: 26px; border-radius: 8px; background: var(--accent); color: #fff; display: grid; place-items: center; font-size: 13px; font-weight: 700; }
-  ul.rules { margin: 0; padding-left: 18px; color: var(--muted); font-size: 14px; }
-  ul.rules li { margin: 4px 0; }
+    font: 16px/1.55 "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif; }
+  a { color: var(--link); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  a:hover { text-decoration-thickness: 2px; }
+  a:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
+  .mono { font-family: ui-monospace, "Cascadia Mono", SFMono-Regular, Menlo, Consolas, monospace; font-size: .875em; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 32px 16px 56px; }
+
+  /* Header */
+  header { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; letter-spacing: -.01em; }
+  .brand svg { width: 26px; height: 26px; flex: none; }
+  .net { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); }
+  .net i { width: 8px; height: 8px; border-radius: 50%; background: var(--unknown); }
+  .net.live i { background: var(--ok); }
+
+  /* Verdict */
+  .verdict { margin: 48px 0 0; max-width: 32ch; font-size: clamp(28px, 4.2vw, 44px); line-height: 1.12; font-weight: 700; letter-spacing: -.022em; }
+  .context { margin: 14px 0 0; color: var(--muted); max-width: 70ch; }
+  .context b { color: var(--ink); font-weight: 600; }
+  .context a { white-space: nowrap; }
+  .alert { margin: 16px 0 0; display: flex; gap: 10px; align-items: flex-start; color: var(--block); max-width: 70ch; font-weight: 500; }
+  .alert svg { flex: none; margin-top: 3px; }
+
+  /* The gate board: the signature element */
+  .board { margin-top: 36px; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+  .head, .lane { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.6fr) 150px minmax(0, 1.05fr); align-items: center; }
+  .head { padding: 12px 24px; border-bottom: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+  .head span:nth-child(3) { text-align: center; }
+  .lane { padding: 22px 24px; border-top: 1px solid var(--line); min-height: 112px; }
+  .lane:first-of-type { border-top: 0; }
+  .cat h3 { margin: 0; font-size: 17px; font-weight: 650; letter-spacing: -.005em; }
+  .cat p { margin: 4px 0 0; font-size: 13.5px; color: var(--muted); line-height: 1.45; max-width: 32ch; }
+  .doc { padding-right: 24px; min-width: 0; }
+  .doc-title { margin: 0; font-size: 14.5px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .doc-title.quiet { color: var(--muted); }
+  .doc-src { margin: 4px 0 0; font-size: 13px; color: var(--muted); }
+  .doc-src a { font-weight: 600; }
+  .flag { display: inline-block; margin-top: 8px; font-size: 12.5px; font-weight: 600; color: var(--block); }
+
+  /* Status on the wire */
+  .wire { position: relative; display: flex; justify-content: center; align-items: center; align-self: stretch; }
+  .wire::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; border-top: 2px solid var(--wire, var(--line)); }
+  .wire.dashed::before { border-top-style: dashed; }
+  .wire.end::before { right: 50%; }
+  .pill { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px 5px 9px; border-radius: 999px;
+    font-size: 13px; font-weight: 700; letter-spacing: .02em; background: var(--tint); color: var(--tone); box-shadow: 0 0 0 4px var(--panel); }
+  .pill svg { width: 14px; height: 14px; }
+  .s-OK { --tone: var(--ok); --tint: var(--ok-t); --wire: var(--ok); }
+  .s-REVIEW { --tone: var(--review); --tint: var(--review-t); --wire: var(--review); }
+  .s-BLOCK { --tone: var(--block); --tint: var(--block-t); --wire: var(--block); }
+  .s-UNKNOWN { --tone: var(--unknown); --tint: var(--unknown-t); --wire: var(--line); }
+  .s-REPORT { --tone: var(--link); }
+
+  /* Gate */
+  .gatecell { display: flex; align-items: center; gap: 14px; padding-left: 24px; position: relative; min-width: 0; }
+  .gatecell.wired::before { content: ""; position: absolute; left: 0; width: 24px; top: 50%; border-top: 2px solid var(--wire, var(--line)); }
+  .gatecell.wired.dashed::before { border-top-style: dashed; }
+  .gate { width: 58px; height: 40px; flex: none; color: var(--tone); overflow: visible; }
+  .gate .bar { transform-box: view-box; transform-origin: 9px 17px; transition: transform .7s cubic-bezier(.2,.8,.2,1); }
+  .gate.open .bar { transform: rotate(-52deg); }
+  .tok { min-width: 0; }
+  .tok-line { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .tok-name { font-weight: 700; font-size: 16px; }
+  .tok-state { font-weight: 700; font-size: 14px; color: var(--tone); }
+  .tok-why { margin: 2px 0 0; font-size: 13px; color: var(--muted); line-height: 1.45; }
+  .tok-addr { font-size: 12.5px; }
+  .none { font-size: 13px; color: var(--muted); }
+
+  /* Lower sections */
+  .lower { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 48px; margin-top: 56px; }
+  h2 { font-size: 20px; letter-spacing: -.01em; margin: 0 0 6px; }
+  .sub { margin: 0 0 18px; color: var(--muted); font-size: 14.5px; max-width: 60ch; }
+  ol.events { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+  ol.events li { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 4px 16px; padding: 14px 0; border-bottom: 1px solid var(--line); font-size: 14.5px; }
+  .ev-time { color: var(--muted); font-size: 13.5px; }
+  .ev-what { font-weight: 650; display: inline-flex; align-items: center; gap: 7px; }
+  .ev-what svg { width: 14px; height: 14px; color: var(--tone); flex: none; }
+  .ev-detail { grid-column: 2; color: var(--muted); font-size: 13.5px; overflow-wrap: anywhere; }
+  table.map { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+  table.map th { text-align: left; font-weight: 600; font-size: 13px; color: var(--muted); padding: 0 0 8px; border-bottom: 1px solid var(--line); }
+  table.map td { padding: 10px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.map td:last-child { text-align: right; white-space: nowrap; }
+  table.map .pill { box-shadow: none; }
+  ul.rules { margin: 20px 0 0; padding: 0; list-style: none; font-size: 14.5px; }
+  ul.rules li { padding: 8px 0 8px 18px; position: relative; color: var(--muted); }
+  ul.rules li::before { content: ""; position: absolute; left: 0; top: 17px; width: 7px; height: 2px; background: var(--muted); }
   ul.rules b { color: var(--ink); font-weight: 600; }
-  footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px;
-    display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-  footer a { color: var(--accent-ink); text-decoration: none; }
-  footer a:hover { text-decoration: underline; }
-  code { font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
-  .skeleton { color: transparent !important; background: var(--unknown-bg) !important; border-radius: 6px; }
-  .summary { flex-direction: column; align-items: stretch; gap: 10px; }
-  .verdict { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight: 650; }
-  .vdot { width: 10px; height: 10px; border-radius: 50%; background: var(--unknown); flex: none; }
-  .vdot.ok { background: var(--ok); } .vdot.review { background: var(--review); } .vdot.block { background: var(--block); }
-  .doc { border-top: 1px solid var(--line); padding-top: 12px; margin-top: auto; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-  .doc-label { font-size: 11.5px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
-  .doc-title { font-size: 14px; color: var(--ink); line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  .doc-title.dim { color: var(--muted); }
-  .doc-meta { display: flex; gap: 6px 10px; flex-wrap: wrap; align-items: center; font-size: 13px; color: var(--muted); }
-  .doc-meta a { color: var(--accent-ink); text-decoration: none; font-weight: 600; }
-  .doc-meta a:hover { text-decoration: underline; }
-  .why { font-size: 14px; color: var(--muted); margin: 0; }
-  .why b { color: var(--ink); font-weight: 600; }
-  .addr { font: 12.5px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--accent-ink); text-decoration: none; }
-  .addr:hover { text-decoration: underline; }
-  ul.feed { list-style: none; margin: 0; padding: 0; }
-  ul.feed li { display: grid; grid-template-columns: 170px minmax(0, 1fr) auto; gap: 6px 16px; align-items: baseline; padding: 11px 0; border-top: 1px solid var(--line); font-size: 14px; }
-  ul.feed li:first-child { border-top: 0; padding-top: 2px; }
-  .ev { font-size: 12px; font-weight: 700; letter-spacing: .03em; padding: 3px 8px; border-radius: 6px; white-space: nowrap; justify-self: start; }
-  .ev.report { color: var(--accent-ink); background: var(--unknown-bg); }
-  .ev.latched { color: var(--block); background: var(--block-bg); }
-  .ev.cleared { color: var(--ok); background: var(--ok-bg); }
-  .ev-detail { color: var(--ink); min-width: 0; overflow-wrap: anywhere; }
-  .ev-detail span { color: var(--muted); }
-  .ev-time { color: var(--muted); font-size: 13px; white-space: nowrap; }
-  .ev-time a { color: var(--accent-ink); text-decoration: none; }
-  .ev-time a:hover { text-decoration: underline; }
-  .note { color: var(--muted); font-size: 13px; margin: 12px 0 0; }
-  @media (max-width: 720px) { ul.feed li { grid-template-columns: 1fr; } }
+
+  ol.steps { list-style: none; margin: 20px 0 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 24px; counter-reset: s; }
+  ol.steps li { counter-increment: s; border-top: 2px solid var(--ink); padding-top: 14px; }
+  ol.steps li::before { content: counter(s); display: block; font-weight: 700; font-size: 14px; color: var(--muted); margin-bottom: 4px; }
+  ol.steps h3 { margin: 0 0 6px; font-size: 16px; }
+  ol.steps p { margin: 0; color: var(--muted); font-size: 14px; }
+  .runs { margin-top: 56px; }
+
+  footer { margin-top: 56px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13.5px; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+
+  @media (max-width: 860px) {
+    .head { display: none; }
+    .lane { grid-template-columns: 1fr auto; grid-template-areas: "cat wire" "doc doc" "gate gate"; gap: 14px 16px; padding: 20px; }
+    .cat { grid-area: cat; } .doc { grid-area: doc; padding-right: 0; } .wire { grid-area: wire; align-self: start; }
+    .wire::before { display: none; }
+    .gatecell { grid-area: gate; padding: 12px 0 0; border-top: 1px dashed var(--line); }
+    .gatecell.wired::before { display: none; }
+    .lower { grid-template-columns: 1fr; gap: 40px; }
+    ol.steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 520px) {
+    .verdict { margin-top: 32px; }
+    ol.steps { grid-template-columns: 1fr; }
+    ol.events li { grid-template-columns: 1fr; }
+    .ev-detail { grid-column: 1; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .gate .bar { transition: opacity .3s ease; }
+  }
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
-    <div>
-      <div class="brand">
-        <div class="mark" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6l7-3z"/><path d="M9 12l2 2 4-4"/></svg>
-        </div>
-        <h1>Reg-Gate</h1>
-      </div>
-      <p class="tag">Live, on-chain regulatory status for tokenized assets. A Chainlink CRE workflow reads U.S. Federal Register publications and writes a fail-closed status that token contracts check before every transfer.</p>
+    <div class="brand">
+      <svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="var(--mark)"/><rect x="13" y="20" width="9" height="32" rx="4.5" fill="#fff"/><rect x="10" y="48" width="15" height="5" rx="2.5" fill="#fff"/><g transform="rotate(-26 17.5 26)"><rect x="15" y="21" width="40" height="10" rx="5" fill="#fff"/><rect x="28" y="21" width="5.5" height="10" fill="var(--mark)"/><rect x="41" y="21" width="5.5" height="10" fill="var(--mark)"/></g></svg>
+      Reg-Gate
     </div>
-    <span class="pill" id="netpill"><span class="dot" id="netdot"></span><span id="nettext">Connecting to Sepolia</span></span>
+    <span class="net" id="net"><i></i><span id="nettext">Connecting to Sepolia</span></span>
   </header>
 
-  <div class="banner info" id="banner" hidden></div>
+  <main>
+    <h1 class="verdict" id="verdict">Reading the contract on Sepolia.</h1>
+    <p class="context" id="context">A Chainlink CRE workflow reads U.S. Federal Register publications, writes a status for each asset category to a contract, and tokens check it before every transfer.</p>
+    <p class="alert" id="alert" hidden></p>
 
-  <div class="banner summary" id="freshbox">
-    <div class="verdict"><span class="vdot" id="vdot"></span><span id="verdict">Reading the contract on Sepolia</span></div>
-    <div class="fresh">
-      <span>Last report <b id="last">loading</b></span>
-      <span>Fresh until <b id="until">loading</b></span>
-      <span>Contract <b><a id="contract" href="#" target="_blank" rel="noopener noreferrer">loading</a></b></span>
+    <section class="board" aria-label="Status by category">
+      <div class="head" aria-hidden="true"><span>Category</span><span>Document behind the status</span><span>Status</span><span>Demo token gate</span></div>
+      <div id="lanes"></div>
+    </section>
+
+    <div class="lower">
+      <section aria-labelledby="ev-h">
+        <h2 id="ev-h">Contract events</h2>
+        <p class="sub">Every accepted report, latch and reviewer clear is an event on the contract, so this list is a public audit trail. A report the contract rejects reverts and leaves no event.</p>
+        <ol class="events" id="events"><li><span class="ev-time">Loading</span><span>Reading contract events</span></li></ol>
+      </section>
+      <section aria-labelledby="dec-h">
+        <h2 id="dec-h">How a status is decided</h2>
+        <p class="sub">Only watched regulators count: SEC, CFTC, Treasury, OCC, FDIC, the Fed, FinCEN, OFAC, CFPB, IRS and the White House.</p>
+        <table class="map">
+          <thead><tr><th scope="col">Matching document type</th><th scope="col">Status</th></tr></thead>
+          <tbody id="maprows"></tbody>
+        </table>
+        <ul class="rules">
+          <li><b>Silence blocks.</b> No report, or one older than the freshness limit, reads BLOCK everywhere.</li>
+          <li><b>A BLOCK latches</b> until a human reviewer clears it, and a cleared document still reads REVIEW, never OK.</li>
+          <li><b>Only Chainlink's forwarder can write,</b> for this chain, with a strictly newer timestamp each time.</li>
+          <li><b>This page fails closed too.</b> If it cannot read the chain it shows UNKNOWN, never OK.</li>
+        </ul>
+      </section>
     </div>
-  </div>
 
-  <h2>Status by category</h2>
-  <div class="grid" id="cats"></div>
-
-  <h2>Demo tokens on Sepolia</h2>
-  <div class="grid tokens" id="tokens"></div>
-
-  <h2>On-chain activity</h2>
-  <div class="card">
-    <ul class="feed" id="feed"><li><span class="ev-detail"><span>Loading contract events</span></span></li></ul>
-    <p class="note">Every accepted report, latch and reviewer clear is a contract event, so this is a public audit trail. Reports the contract rejects revert and leave no event; the README shows one.</p>
-  </div>
-
-  <h2>How it works</h2>
-  <div class="steps">
-    <div class="card step"><span class="n">1</span><h3>Fetch</h3><p>Every node in the Chainlink DON pulls the same finished window of Federal Register publications from watched regulators: SEC, CFTC, Treasury, OCC, FDIC, Fed, FinCEN, OFAC, CFPB, IRS and the White House.</p></div>
-    <div class="card step"><span class="n">2</span><h3>Classify and agree</h3><p>A deterministic rules engine sorts documents into four categories. Final rules and executive orders mean BLOCK; proposals and notices mean REVIEW. Nodes must agree byte for byte. No LLM in the decision path.</p></div>
-    <div class="card step"><span class="n">3</span><h3>Write and enforce</h3><p>The signed result lands in RegGateStatus. Tokens ask it before each transfer: strict tokens pass only on OK, lenient tokens pass on anything but BLOCK.</p></div>
-    <div class="card step"><span class="n">4</span><h3>Re-verify on override</h3><p>When a reviewer clears a BLOCK, the contract emits LatchCleared. That event triggers the workflow again, so the clear is checked against the freshest Federal Register data within minutes.</p></div>
-  </div>
-
-  <h2>Fail-closed by design</h2>
-  <div class="card">
-    <ul class="rules">
-      <li><b>No report, or a stale one:</b> every category reads BLOCK.</li>
-      <li><b>API down, bad data, or nodes disagree:</b> nothing is written, so the contract goes stale and blocks.</li>
-      <li><b>A BLOCK latches:</b> it holds through later OK reports until a human reviewer clears it.</li>
-      <li><b>Cleared, but the same rule is still in the window:</b> REVIEW, never OK.</li>
-      <li><b>A reviewer clear triggers a re-check:</b> the workflow listens for the LatchCleared event and re-verifies against the Federal Register at once, so a newer blocking rule re-latches in minutes, not hours.</li>
-      <li><b>Only Chainlink's forwarder can write,</b> bound to this chain, with a strictly increasing timestamp to stop replays.</li>
-      <li><b>This page fails closed too:</b> if it cannot reach Sepolia, it shows UNKNOWN, never OK.</li>
-    </ul>
-  </div>
+    <section class="runs" aria-labelledby="run-h">
+      <h2 id="run-h">How it runs</h2>
+      <ol class="steps">
+        <li><h3>Fetch</h3><p>Every node in the Chainlink DON pulls the same finished window of Federal Register publications.</p></li>
+        <li><h3>Classify and agree</h3><p>A deterministic rules engine sorts them into four categories. Nodes must agree byte for byte. No LLM decides.</p></li>
+        <li><h3>Write and enforce</h3><p>The signed result lands in the RegGateStatus contract. Tokens ask it before each transfer.</p></li>
+        <li><h3>Re-check on override</h3><p>When a reviewer clears a BLOCK, that event triggers the workflow again within minutes.</p></li>
+      </ol>
+    </section>
+  </main>
 
   <footer>
     <span>Flags regulatory publications for human review. Not legal advice. Built by NorthSchema.</span>
-    <span><a href="https://github.com/nctrnlsoul/reg-gate" target="_blank" rel="noopener noreferrer">Source on GitHub</a></span>
+    <a href="https://github.com/nctrnlsoul/reg-gate" target="_blank" rel="noopener noreferrer">Source on GitHub</a>
   </footer>
 </div>
 
@@ -190,12 +228,11 @@
   const SEPOLIA_HEX = '0xaa36a7';
   const DEFAULT_RPCS = ['https://ethereum-sepolia-rpc.publicnode.com', 'https://sepolia.drpc.org'];
   const CATS = [
-    ['STABLECOINS', 'Stablecoins', 'Payment stablecoin issuance, reserves and the GENIUS Act.'],
-    ['TOKENIZED_SECURITIES', 'Tokenized securities', 'Tokenized funds, crypto asset investment contracts and SEC securities rules.'],
+    ['STABLECOINS', 'Stablecoins', 'Stablecoin issuance and reserves, including the GENIUS Act.'],
+    ['TOKENIZED_SECURITIES', 'Tokenized securities', 'Tokenized funds and crypto assets under SEC securities rules.'],
     ['DIGITAL_ASSET_MARKETS', 'Digital asset markets', 'Crypto trading, custody, market structure and listings.'],
-    ['AML_SANCTIONS', 'AML and sanctions', 'Money laundering, Bank Secrecy Act, sanctions and mixers, where digital assets are involved.'],
+    ['AML_SANCTIONS', 'AML and sanctions', 'Money laundering, sanctions and mixers, where digital assets are involved.'],
   ];
-  const SHORT = ['Stablecoins', 'Tokenized', 'Markets', 'AML'];
   const STATUS = ['OK', 'REVIEW', 'BLOCK'];
   const ADDR = /^0x[0-9a-fA-F]{40}$/;
   const DOCNUM = /^\d{4}-\d{4,6}$/;
@@ -211,12 +248,44 @@
   const T_STATUS = '0x7bb7e136e435ccb26bf677f3fce3572a4c8b33fad6b75908d576edff5ac77af8';
   const T_LATCHED = '0x45ca50b55474b3b1c5577ef29d3ec7bcb578f4353ccb6d3f10e3d0715a649963';
   const T_CLEARED = '0x1dd0de6cc67078b1932e1c8f833fd76ba4ce87e9b5619f33180bef3397f0f0f0';
-  const LOG_CHUNK = 9000;      // stays under free-tier RPC range limits
-  const LOG_MAX_CHUNKS = 12;   // about two weeks of Sepolia blocks
+  const LOG_CHUNK = 9000;     // stays under free-tier RPC range limits
+  const LOG_MAX_CHUNKS = 12;  // about two weeks of Sepolia blocks
+  const SVGNS = 'http://www.w3.org/2000/svg';
+
   const $ = (id) => document.getElementById(id);
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
   const ext = (href, text, cls) => { const a = el('a', cls || null, text); a.href = href; a.target = '_blank'; a.rel = 'noopener noreferrer'; return a; };
   const shortAddr = (a) => a.slice(0, 6) + '…' + a.slice(-4);
+  function svg(paths, view, cls) {
+    const s = document.createElementNS(SVGNS, 'svg');
+    s.setAttribute('viewBox', view || '0 0 16 16'); s.setAttribute('aria-hidden', 'true'); if (cls) s.setAttribute('class', cls);
+    for (const [tag, attrs] of paths) {
+      const p = document.createElementNS(SVGNS, tag);
+      for (const k in attrs) p.setAttribute(k, attrs[k]);
+      s.append(p);
+    }
+    return s;
+  }
+  const stroke = { fill: 'none', stroke: 'currentColor', 'stroke-width': '2', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' };
+  const ICON = {
+    OK: () => svg([['path', { d: 'M3.5 8.5l3 3 6-7', ...stroke }]]),
+    REVIEW: () => svg([['path', { d: 'M8 3.5v5.5', ...stroke }], ['circle', { cx: '8', cy: '12.3', r: '1.1', fill: 'currentColor' }]]),
+    BLOCK: () => svg([['path', { d: 'M4.5 4.5l7 7M11.5 4.5l-7 7', ...stroke }]]),
+    REPORT: () => svg([['circle', { cx: '8', cy: '8', r: '4', fill: 'currentColor' }]]),
+    UNKNOWN: () => svg([['path', { d: 'M6 6.2a2 2 0 1 1 2.8 1.8c-.6.3-.8.7-.8 1.3v.4', ...stroke }], ['circle', { cx: '8', cy: '12.4', r: '1.1', fill: 'currentColor' }]]),
+  };
+  function pill(status) {
+    const p = el('span', 'pill s-' + status);
+    p.append(ICON[status](), status);
+    return p;
+  }
+  function gateIcon(open) {
+    return svg([
+      ['rect', { x: '4', y: '10', width: '6', height: '28', rx: '2', fill: 'currentColor' }],
+      ['rect', { x: '48', y: '10', width: '6', height: '28', rx: '2', fill: 'currentColor', opacity: '.45' }],
+      ['rect', { class: 'bar', x: '7', y: '14.5', width: '46', height: '5', rx: '2.5', fill: 'currentColor' }],
+    ], '0 0 58 40', 'gate' + (open ? ' open' : ''));
+  }
 
   // Optional ?rpc= override for local testing. Only https or localhost.
   const override = new URLSearchParams(location.search).get('rpc');
@@ -259,27 +328,34 @@
   function ago(sec) {
     const d = Math.max(0, chainNow - sec);
     if (d < 90) return 'just now';
-    if (d < 5400) return Math.round(d / 60) + ' min ago';
-    if (d < 172800) return Math.round(d / 3600) + ' h ago';
+    if (d < 5400) return Math.round(d / 60) + ' minutes ago';
+    if (d < 172800) return Math.round(d / 3600) + ' hours ago';
     return Math.round(d / 86400) + ' days ago';
   }
-  const fmt = (sec) => new Date(sec * 1000).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  const fmt = (sec) => new Date(sec * 1000).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 
-  function setNet(ok, text) {
-    $('nettext').textContent = text;
-    $('netdot').className = 'dot' + (ok ? ' live' : '');
+  function setNet(ok, text) { $('net').className = 'net' + (ok ? ' live' : ''); $('nettext').textContent = text; }
+  function setAlert(text) {
+    const a = $('alert');
+    a.hidden = !text; a.replaceChildren();
+    if (text) { const i = ICON.BLOCK(); i.setAttribute('width', '16'); i.setAttribute('height', '16'); a.append(i, el('span', null, text)); }
   }
-  function setVerdict(tone, text) {
-    $('vdot').className = 'vdot' + (tone ? ' ' + tone : '');
-    $('verdict').textContent = text;
-  }
-  function banner(kind, html) {
-    const b = $('banner');
-    b.hidden = !kind; b.className = 'banner ' + (kind || '');
-    b.replaceChildren(); if (html) html.forEach((n) => b.append(n));
+  function setContext(parts) {
+    const c = $('context'); c.replaceChildren();
+    for (const p of parts) c.append(p);
   }
 
-  // ---- Federal Register titles: display only. Statuses come from the contract, never from here.
+  // Severity table, drawn with the same pills as the board.
+  (function renderMap() {
+    const rows = [['Final rule or presidential document', 'BLOCK'], ['Proposed rule or notice', 'REVIEW'], ['Any other type', 'BLOCK'], ['Nothing matched in the window', 'OK']];
+    const body = $('maprows');
+    for (const [label, st] of rows) {
+      const tr = el('tr'); tr.append(el('td', null, label));
+      const td = el('td'); td.append(pill(st)); tr.append(td); body.append(tr);
+    }
+  })();
+
+  // Federal Register titles: display only. Statuses come from the contract, never from here.
   const titles = new Map(); // docNumber -> { title, type, agency } | 'pending' | 'failed'
   async function loadTitles(docs) {
     const want = [...new Set(docs)].filter((d) => DOCNUM.test(d) && !titles.has(d));
@@ -305,88 +381,70 @@
     return true;
   }
 
-  function docBlock(doc, label) {
-    const box = el('div', 'doc');
-    box.append(el('span', 'doc-label', label));
-    if (!DOCNUM.test(doc)) { box.append(el('code', null, doc)); return box; }
-    const info = titles.get(doc);
-    if (info && typeof info === 'object') box.append(el('div', 'doc-title', info.title));
-    else box.append(el('div', 'doc-title dim', info === 'failed' || !info ? 'Federal Register document ' + doc : 'Loading title…'));
-    const meta = el('div', 'doc-meta');
-    if (info && typeof info === 'object') {
-      if (info.agency) meta.append(el('span', null, info.agency));
-      meta.append(el('span', null, info.type));
+  function docCell(r) {
+    const c = el('div', 'doc');
+    if (!r) { c.append(el('p', 'doc-title quiet', 'Not readable right now.')); return c; }
+    if (!r.doc) {
+      c.append(el('p', 'doc-title quiet', r.reported === 'OK' ? 'No matching publication in the review window.' : 'No document recorded.'));
+    } else if (!DOCNUM.test(r.doc)) {
+      c.append(el('p', 'doc-title mono', r.doc));
+    } else {
+      const info = titles.get(r.doc);
+      const known = info && typeof info === 'object';
+      c.append(el('p', 'doc-title' + (known ? '' : ' quiet'), known ? info.title : info === 'pending' ? 'Loading the document title.' : 'Federal Register document (title unavailable right now)'));
+      const src = el('p', 'doc-src');
+      const what = known ? [info.agency, info.type.toLowerCase()].filter(Boolean).join(', ') : '';
+      if (what) src.append(what + ', ');
+      src.append(ext('https://www.federalregister.gov/d/' + r.doc, r.doc));
+      if (!r.fresh) src.append(' (from the last report)');
+      c.append(src);
     }
-    meta.append(ext('https://www.federalregister.gov/d/' + doc, doc + ' ↗'));
-    box.append(meta);
-    return box;
+    if (r.latched) c.append(el('span', 'flag', 'Latched. Waiting for a reviewer to clear it.'));
+    else if (!r.fresh && r.last) c.append(el('span', 'flag', 'Reads BLOCK because the report is stale.'));
+    return c;
   }
 
-  let lastRows = null;
-  function renderCats(rows) {
-    lastRows = rows;
-    const root = $('cats'); root.replaceChildren();
-    CATS.forEach(([, label, desc], i) => {
+  function gateCell(row, tokens, status, dashed) {
+    const c = el('div', 'gatecell');
+    if (!tokens.length) { c.append(el('span', 'none', 'No demo token on this lane')); return c; }
+    c.classList.add('wired', 's-' + status); if (dashed) c.classList.add('dashed');
+    for (const t of tokens) {
+      const a = t.allowed;
+      const tone = a === true ? 'OK' : a === false ? 'BLOCK' : 'UNKNOWN';
+      const box = el('div', 'tok s-' + tone);
+      const g = gateIcon(a === true); g.classList.add('s-' + tone);
+      const line = el('div', 'tok-line');
+      line.append(el('span', 'tok-name', t.symbol), el('span', 'tok-state', a === true ? 'Open' : a === false ? 'Blocked' : 'Unknown'));
+      let why;
+      if (a === null || a === undefined || !row) why = 'Could not read it, so treat it as blocked.';
+      else if (a) why = t.strict ? 'Strict token, and the category is OK.' : 'Lenient token. It only stops on BLOCK.';
+      else why = t.strict && status !== 'BLOCK' ? 'Strict token. It only moves on OK.' : 'The category is BLOCK.';
+      box.append(line, el('p', 'tok-why', why));
+      if (ADDR.test(t.address)) { const p = el('p', 'tok-why'); p.append(ext('https://sepolia.etherscan.io/address/' + t.address, shortAddr(t.address), 'mono tok-addr')); box.append(p); }
+      c.append(g, box);
+    }
+    return c;
+  }
+
+  let lastState = null;
+  function renderLanes(state) {
+    lastState = state;
+    const root = $('lanes'); root.replaceChildren();
+    const rows = state && state.rows;
+    CATS.forEach(([key, label, desc], i) => {
       const r = rows ? rows[i] : null;
       const status = r ? r.status : 'UNKNOWN';
-      const card = el('div', 'card');
-      const top = el('div', 'card-top');
-      top.append(el('h3', null, label), el('span', 'chip ' + status, status));
-      card.append(top, el('p', null, desc));
-      if (r && r.doc) card.append(docBlock(r.doc, r.fresh ? 'Triggered by' : 'Last report flagged'));
-      else {
-        const meta = el('div', 'doc');
-        meta.append(el('span', 'doc-meta', r && status === 'OK' ? 'No matching publications in the window.'
-          : r ? 'No document recorded for this status.' : 'Status unavailable. Treat as BLOCK.'));
-        card.append(meta);
-      }
-      const flags = el('div', 'meta');
-      if (r && r.latched) flags.append(el('span', 'badge', 'Latched until a reviewer clears it'));
-      if (r && !r.fresh) flags.append(el('span', 'badge', 'BLOCK because the data is stale'));
-      if (r && r.reported !== r.status && r.fresh) flags.append(el('span', null, 'Last report said ' + r.reported + '.'));
-      if (flags.childNodes.length) card.append(flags);
-      root.append(card);
+      const dashed = !r || !r.fresh;
+      const lane = el('div', 'lane');
+      const cat = el('div', 'cat'); cat.append(el('h3', null, label), el('p', null, desc));
+      const toks = state && state.tokens ? state.tokens.filter((t) => t.category === key) : [];
+      const wire = el('div', 'wire s-' + status + (dashed ? ' dashed' : '') + (toks.length ? '' : ' end')); wire.append(pill(status));
+      lane.append(cat, docCell(r), wire, gateCell(r, toks, status, dashed));
+      root.append(lane);
     });
   }
 
-  function whyLine(t, a, rows) {
-    const ci = CATS.findIndex(([key]) => key === t.category);
-    const label = ci >= 0 ? CATS[ci][1] : t.category;
-    const st = rows && ci >= 0 ? rows[ci].status : null;
-    const p = el('p', 'why');
-    const b = (x) => el('b', null, x);
-    if (a === null || !st) { p.append('Unknown, so treat it as blocked.'); return p; }
-    if (a) {
-      p.append(b('Open: '), label + ' is ' + st + (t.strict ? '.' : ', and ' + t.symbol + ' only stops on BLOCK.'));
-    } else {
-      p.append(b('Blocked: '), label + ' is ' + st + (t.strict && st !== 'BLOCK' ? ', and ' + t.symbol + ' only moves on OK.' : '.'));
-    }
-    return p;
-  }
-
-  function renderTokens(list, allowed, rows) {
-    const root = $('tokens'); root.replaceChildren();
-    if (!list || !list.length) { root.append(el('div', 'card', 'Demo tokens appear here after deployment.')); return; }
-    list.forEach((t, i) => {
-      const card = el('div', 'card');
-      const top = el('div', 'card-top');
-      const left = el('div');
-      left.append(el('div', 'tok-name', t.symbol), el('div', 'tok-sub',
-        (t.strict ? 'Strict: passes only on OK' : 'Lenient: blocked only on BLOCK') + ' · gated on ' + t.category.replace(/_/g, ' ').toLowerCase()));
-      const a = allowed ? allowed[i] : null;
-      top.append(left, el('span', 'chip ' + (a === true ? 'OK' : a === false ? 'BLOCK' : 'UNKNOWN'),
-        a === true ? 'TRANSFERS OPEN' : a === false ? 'TRANSFERS BLOCKED' : 'UNKNOWN'));
-      card.append(top, whyLine(t, a, rows));
-      if (ADDR.test(t.address)) {
-        const meta = el('div', 'meta');
-        meta.append(el('span', null, 'Contract'), ext('https://sepolia.etherscan.io/address/' + t.address, shortAddr(t.address), 'addr'));
-        card.append(meta);
-      }
-      root.append(card);
-    });
-  }
-
-  // ---- Activity feed from contract events
+  // Contract events
   let feedKey = null;
   function decodeLog(l) {
     if (!l || !Array.isArray(l.topics) || typeof l.data !== 'string' || !/^0x[0-9a-fA-F]*$/.test(l.data)) return null;
@@ -398,26 +456,26 @@
     try {
       if (t0 === T_STATUS && l.topics.length >= 2) {
         const asOf = Number(BigInt(l.topics[1]));
-        const sts = [0, 1, 2, 3].map((i) => STATUS[Number(uint(w(i)))] || '?');
-        return { ...base, time: time || asOf, kind: 'report', label: 'Report accepted',
-          detail: sts.map((s, i) => SHORT[i] + ' ' + s).join(' · ') };
+        const sts = [0, 1, 2, 3].map((i) => STATUS[Number(uint(w(i)))] || 'unknown');
+        return { ...base, time: time || asOf, tone: 'REPORT', what: 'Report accepted',
+          detail: CATS.map(([, n], i) => n + ' ' + sts[i]).join(', ') + '.' };
       }
       if ((t0 === T_LATCHED || t0 === T_CLEARED) && l.topics.length >= 2) {
         const cat = Number(BigInt(l.topics[1]));
         const doc = b32str(w(0)) || 'no document';
-        const name = CATS[cat] ? CATS[cat][1] : 'category ' + cat;
-        if (t0 === T_LATCHED) return { ...base, kind: 'latched', label: 'BLOCK latched', detail: name + ': ' + doc };
+        const name = CATS[cat] ? CATS[cat][1] : 'Category ' + cat;
+        if (t0 === T_LATCHED) return { ...base, tone: 'BLOCK', what: 'BLOCK latched', detail: name + ', document ' + doc + '.' };
         const by = l.topics[2] ? '0x' + String(l.topics[2]).slice(-40) : '';
-        return { ...base, kind: 'cleared', label: 'Reviewer cleared', detail: name + ': ' + doc + (by ? ' · by ' + shortAddr(by) : '') + ' · workflow re-checks' };
+        return { ...base, tone: 'OK', what: 'Reviewer cleared a latch', detail: name + ', document ' + doc + (by ? ', by ' + shortAddr(by) : '') + '. The workflow re-checks now.' };
       }
     } catch { return null; }
     return null;
   }
 
   async function loadFeed(gate, fromBlock, latest) {
-    const feed = $('feed');
+    const list = $('events');
     try {
-      let start = Math.max(Number.isInteger(fromBlock) && fromBlock > 0 ? fromBlock : latest - LOG_CHUNK, latest - LOG_CHUNK * LOG_MAX_CHUNKS);
+      const start = Math.max(Number.isInteger(fromBlock) && fromBlock > 0 ? fromBlock : latest - LOG_CHUNK, latest - LOG_CHUNK * LOG_MAX_CHUNKS);
       const logs = [];
       for (let from = start; from <= latest; from += LOG_CHUNK) {
         const to = Math.min(from + LOG_CHUNK - 1, latest);
@@ -427,21 +485,22 @@
         logs.push(...part.filter((l) => !l.removed && String(l.address).toLowerCase() === gate.toLowerCase()));
       }
       const events = logs.map(decodeLog).filter(Boolean).sort((a, b) => b.block - a.block || b.index - a.index).slice(0, 8);
-      feed.replaceChildren();
-      if (!events.length) { feed.append(el('li', null, 'No contract events yet.')); return; }
+      list.replaceChildren();
+      if (!events.length) { const li = el('li'); li.append(el('span', 'ev-time', 'None yet'), el('span', null, 'The contract has not accepted a report.')); list.append(li); return; }
       for (const e of events) {
         const li = el('li');
-        li.append(el('span', 'ev ' + e.kind, e.label));
-        li.append(el('span', 'ev-detail', e.detail));
-        const when = el('span', 'ev-time');
-        const txt = e.time ? ago(e.time) : 'block ' + e.block;
-        if (e.tx) when.append(ext('https://sepolia.etherscan.io/tx/' + e.tx, txt + ' ↗')); else when.append(txt);
-        if (e.time) when.title = fmt(e.time);
-        li.append(when);
-        feed.append(li);
+        const time = el('span', 'ev-time');
+        const txt = e.time ? ago(e.time) : 'Block ' + e.block;
+        if (e.tx) time.append(ext('https://sepolia.etherscan.io/tx/' + e.tx, txt)); else time.append(txt);
+        if (e.time) time.title = fmt(e.time);
+        const what = el('span', 'ev-what s-' + e.tone);
+        what.append(ICON[e.tone](), e.what);
+        li.append(time, what, el('span', 'ev-detail', e.detail));
+        list.append(li);
       }
     } catch {
-      feed.replaceChildren(el('li', null, 'Activity is unavailable right now. The statuses above come straight from the contract.'));
+      const li = el('li'); li.append(el('span', 'ev-time', 'Unavailable'), el('span', null, 'Events could not be read right now. The statuses above come straight from the contract.'));
+      list.replaceChildren(li);
       feedKey = null; // retry on the next refresh
     }
   }
@@ -454,18 +513,16 @@
       dep = await r.json();
       if (!ADDR.test(dep.regGateStatus)) throw new Error('bad address');
     } catch {
-      setNet(false, 'Not deployed yet');
-      setVerdict(null, 'Not deployed yet');
-      banner('info', [el('span', null, 'The contract has not been deployed to Sepolia yet. Statuses appear here once it is.')]);
-      $('last').textContent = 'none'; $('until').textContent = 'n/a'; $('contract').textContent = 'n/a';
-      $('feed').replaceChildren(el('li', null, 'No contract yet.'));
-      renderCats(null); renderTokens(null, null, null);
+      setNet(false, 'Not deployed');
+      $('verdict').textContent = 'The contract is not deployed yet.';
+      setContext(['Statuses appear here once RegGateStatus is live on Sepolia.']);
+      setAlert(null);
+      $('events').replaceChildren(el('li', null, 'No contract yet.'));
+      renderLanes(null);
       return;
     }
     const gate = dep.regGateStatus;
-    const link = $('contract');
-    link.textContent = shortAddr(gate);
-    link.href = 'https://sepolia.etherscan.io/address/' + gate;
+    const contractLink = ext('https://sepolia.etherscan.io/address/' + gate, shortAddr(gate), 'mono');
 
     try {
       const chain = await rpc('eth_chainId', []);
@@ -485,45 +542,49 @@
         const st = Number(uint(word(s, 0)));
         const rs = Number(uint(word(rep, 0)));
         if (!(st in STATUS) || !(rs in STATUS)) throw new Error('bad status value');
-        return { status: STATUS[st], reported: STATUS[rs], doc: last ? b32str(word(rep, 1)) : '', latched: uint(word(latch, 0)) === 1n, fresh };
+        return { status: STATUS[st], reported: STATUS[rs], doc: last ? b32str(word(rep, 1)) : '', latched: uint(word(latch, 0)) === 1n, fresh, last };
       }));
-      const tokens = (dep.tokens || []).filter((t) => ADDR.test(t.address));
-      const allowed = await Promise.all(tokens.map(async (t) => {
-        try { return uint(word(await call(t.address, SEL.transfersAllowed), 0)) === 1n; } catch { return null; }
+      const tokens = (dep.tokens || []).filter((t) => ADDR.test(t.address)).map((t) => ({ ...t }));
+      await Promise.all(tokens.map(async (t) => {
+        try { t.allowed = uint(word(await call(t.address, SEL.transfersAllowed), 0)) === 1n; } catch { t.allowed = null; }
       }));
 
       setNet(true, 'Live on Sepolia');
-      $('last').textContent = last ? ago(last) + ' (' + fmt(last) + ')' : 'none yet';
-      $('until').textContent = last ? fmt(last + maxAge) : 'n/a';
       if (!last) {
-        setVerdict('block', 'No report yet, so everything is blocked');
-        banner('warn', [el('strong', null, 'No report yet.'), el('span', null, 'Every category reads BLOCK until the workflow writes its first report.')]);
-      } else if (!fresh) {
-        setVerdict('block', 'Stale, so everything is blocked');
-        banner('warn', [el('strong', null, 'Stale data, so everything reads BLOCK.'), el('span', null, 'No fresh report arrived within the freshness limit. That is the fail-closed design working: silence blocks transfers. It does not mean this page is broken.')]);
+        $('verdict').textContent = 'No report yet, so every transfer is blocked.';
+        setAlert('Every category reads BLOCK until the workflow writes its first report.');
+        setContext(['Contract ', contractLink, '.']);
       } else {
-        const clear = rows.filter((r) => r.status === 'OK').length;
-        const open = allowed.filter((a) => a === true).length;
-        const tone = rows.some((r) => r.status === 'BLOCK') ? 'block' : rows.some((r) => r.status === 'REVIEW') ? 'review' : 'ok';
-        setVerdict(tone, 'Fresh report · ' + clear + ' of ' + rows.length + ' categories clear' + (tokens.length ? ' · ' + open + ' of ' + tokens.length + ' demo tokens moving' : ''));
-        banner(null);
+        setContext(['Last report ', el('b', null, ago(last)), ' (' + fmt(last) + '). ',
+          fresh ? 'Fresh until ' : 'Went stale ', el('b', null, fmt(last + maxAge)), '. Contract ', contractLink, '.']);
+        if (!fresh) {
+          $('verdict').textContent = 'The last report is stale, so every transfer is blocked.';
+          setAlert('No fresh report arrived within the freshness limit. That is the fail-closed design working: silence blocks transfers. It does not mean this page is broken.');
+        } else {
+          const clear = rows.filter((r) => r.status === 'OK').length;
+          const toks = tokens.map((t) => t.symbol + (t.allowed === true ? ' can move' : ' is blocked'));
+          const tokText = toks.length ? ' ' + toks.join(', ').replace(/, ([^,]*)$/, ' and $1') + '.' : '';
+          $('verdict').textContent = clear + ' of ' + rows.length + ' categories ' + (clear === 1 ? 'is' : 'are') + ' clear.' + tokText;
+          setAlert(null);
+        }
       }
-      renderCats(rows); renderTokens(tokens, allowed, rows);
+      const state = { rows, tokens };
+      renderLanes(state);
 
-      // Titles and activity are extras: they never change a status, and failures fall back quietly.
-      loadTitles(rows.map((r) => r.doc).filter(Boolean)).then((changed) => { if (changed && lastRows === rows) renderCats(rows); });
-      const key = gate + '|' + last + '|' + rows.map((r) => r.latched ? 1 : 0).join('');
+      // Titles and events are extras: they never change a status, and failures fall back quietly.
+      loadTitles(rows.map((r) => r.doc).filter(Boolean)).then((changed) => { if (changed && lastState === state) renderLanes(state); });
+      const key = gate + '|' + last + '|' + rows.map((r) => (r.latched ? 1 : 0)).join('');
       if (latestBlock && key !== feedKey) { feedKey = key; loadFeed(gate, Number(dep.fromBlock), latestBlock); }
     } catch (e) {
       setNet(false, 'Sepolia unreachable');
-      setVerdict('block', 'Unknown: could not read the chain');
-      $('last').textContent = 'unknown'; $('until').textContent = 'unknown';
-      banner('warn', [el('strong', null, 'Could not read the chain.'), el('span', null, 'Showing UNKNOWN rather than guessing. Retrying shortly.')]);
-      renderCats(null); renderTokens(dep.tokens || [], null, null);
+      $('verdict').textContent = 'Sepolia is unreachable right now, so treat every transfer as blocked.';
+      setContext(['Showing UNKNOWN rather than guessing. Retrying every minute. Contract ', contractLink, '.']);
+      setAlert(null);
+      renderLanes({ rows: null, tokens: (dep.tokens || []).filter((t) => ADDR.test(t.address)).map((t) => ({ ...t, allowed: null })) });
     }
   }
 
-  renderCats(null); renderTokens(null, null, null);
+  renderLanes(null);
   load();
   setInterval(load, 60000);
 })();
