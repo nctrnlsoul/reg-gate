@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reg-Gate</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%234392E6'/%3E%3Cpath d='M12 4.5l5.5 2.3v3.9c0 3.5-2.3 6.4-5.5 7.8-3.2-1.4-5.5-4.3-5.5-7.8V6.8L12 4.5z' fill='none' stroke='white' stroke-width='1.8'/%3E%3C/svg%3E">
+<meta name="description" content="Live on-chain regulatory status for tokenized assets, written by a Chainlink CRE workflow from U.S. Federal Register publications.">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self' https: http://127.0.0.1:8545 http://localhost:8545; img-src 'self' data:; base-uri 'none'; form-action 'none'">
+<style>
+  :root {
+    --bg: #f6f7f9; --surface: #ffffff; --ink: #14181f; --muted: #5b6472; --line: #e3e6eb;
+    --accent: #4392E6; --accent-ink: #1f5fa8;
+    --ok: #127a43; --ok-bg: #e5f5ec; --review: #8a5a00; --review-bg: #fdf1d6;
+    --block: #b42318; --block-bg: #fde8e6; --unknown: #4b5563; --unknown-bg: #eceef1;
+    --radius: 14px; --shadow: 0 1px 2px rgba(16,24,40,.05), 0 1px 3px rgba(16,24,40,.06);
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0d1117; --surface: #151b23; --ink: #e6e9ee; --muted: #9aa4b2; --line: #262e39;
+      --accent: #4392E6; --accent-ink: #8cbcf2;
+      --ok: #4ade80; --ok-bg: #0f2a1b; --review: #fbbf24; --review-bg: #2d2309;
+      --block: #f87171; --block-bg: #2e1312; --unknown: #a8b0bd; --unknown-bg: #1f2630;
+      --shadow: none; color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0d1117; --surface: #151b23; --ink: #e6e9ee; --muted: #9aa4b2; --line: #262e39;
+    --accent: #4392E6; --accent-ink: #8cbcf2;
+    --ok: #4ade80; --ok-bg: #0f2a1b; --review: #fbbf24; --review-bg: #2d2309;
+    --block: #f87171; --block-bg: #2e1312; --unknown: #a8b0bd; --unknown-bg: #1f2630;
+    --shadow: none; color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 32px 16px 48px; }
+  header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .mark { width: 36px; height: 36px; border-radius: 10px; background: var(--accent); display: grid; place-items: center; flex: none; }
+  .mark svg { width: 20px; height: 20px; }
+  h1 { font-size: 26px; line-height: 1.1; margin: 0; letter-spacing: -.01em; }
+  .tag { color: var(--muted); margin: 6px 0 0; max-width: 620px; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; padding: 5px 10px;
+    border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); white-space: nowrap; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .dot.live { background: var(--ok); }
+  .banner { margin: 24px 0 0; padding: 14px 16px; border-radius: var(--radius); border: 1px solid var(--line);
+    background: var(--surface); display: flex; gap: 12px; align-items: center; flex-wrap: wrap; box-shadow: var(--shadow); }
+  .banner strong { font-weight: 650; }
+  .banner.warn { border-color: transparent; background: var(--block-bg); color: var(--block); }
+  .banner.info { border-color: transparent; background: var(--unknown-bg); color: var(--unknown); }
+  .fresh { display: flex; gap: 8px 24px; flex-wrap: wrap; color: var(--muted); font-size: 14px; }
+  .fresh b { color: var(--ink); font-weight: 600; }
+  .fresh a { color: var(--accent-ink); text-decoration: none; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
+  .fresh a:hover { text-decoration: underline; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 36px 0 12px; font-weight: 650; }
+  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+  @media (max-width: 720px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; box-shadow: var(--shadow);
+    display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+  .card h3 { margin: 0; font-size: 17px; }
+  .card p { margin: 0; color: var(--muted); font-size: 14px; }
+  .chip { font-size: 13px; font-weight: 700; letter-spacing: .04em; padding: 6px 11px; border-radius: 8px; white-space: nowrap; }
+  .chip.OK { color: var(--ok); background: var(--ok-bg); }
+  .chip.REVIEW { color: var(--review); background: var(--review-bg); }
+  .chip.BLOCK { color: var(--block); background: var(--block-bg); }
+  .chip.UNKNOWN { color: var(--unknown); background: var(--unknown-bg); }
+  .meta { display: flex; gap: 8px; flex-wrap: wrap; font-size: 13px; color: var(--muted); align-items: center; }
+  .meta a { color: var(--accent-ink); text-decoration: none; font-weight: 600; overflow-wrap: anywhere; }
+  .meta a:hover { text-decoration: underline; }
+  .badge { font-size: 12px; font-weight: 650; padding: 2px 8px; border-radius: 6px; background: var(--block-bg); color: var(--block); }
+  .tokens .card { align-items: flex-start; }
+  .tok-name { font-weight: 650; }
+  .tok-sub { color: var(--muted); font-size: 13px; }
+  .steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+  @media (max-width: 720px) { .steps { grid-template-columns: 1fr; } }
+  .step .n { width: 26px; height: 26px; border-radius: 8px; background: var(--accent); color: #fff; display: grid; place-items: center; font-size: 13px; font-weight: 700; }
+  ul.rules { margin: 0; padding-left: 18px; color: var(--muted); font-size: 14px; }
+  ul.rules li { margin: 4px 0; }
+  ul.rules b { color: var(--ink); font-weight: 600; }
+  footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px;
+    display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  footer a { color: var(--accent-ink); text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
+  code { font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
+  .skeleton { color: transparent !important; background: var(--unknown-bg) !important; border-radius: 6px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <div class="brand">
+        <div class="mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6l7-3z"/><path d="M9 12l2 2 4-4"/></svg>
+        </div>
+        <h1>Reg-Gate</h1>
+      </div>
+      <p class="tag">Live, on-chain regulatory status for tokenized assets. A Chainlink CRE workflow reads U.S. Federal Register publications and writes a fail-closed status that token contracts check before every transfer.</p>
+    </div>
+    <span class="pill" id="netpill"><span class="dot" id="netdot"></span><span id="nettext">Connecting to Sepolia</span></span>
+  </header>
+
+  <div class="banner info" id="banner" hidden></div>
+
+  <div class="banner" id="freshbox">
+    <div class="fresh">
+      <span>Last report <b id="last">loading</b></span>
+      <span>Fresh until <b id="until">loading</b></span>
+      <span>Contract <b><a id="contract" href="#" target="_blank" rel="noopener noreferrer">loading</a></b></span>
+    </div>
+  </div>
+
+  <h2>Status by category</h2>
+  <div class="grid" id="cats"></div>
+
+  <h2>Demo tokens on Sepolia</h2>
+  <div class="grid tokens" id="tokens"></div>
+
+  <h2>How it works</h2>
+  <div class="steps">
+    <div class="card step"><span class="n">1</span><h3>Fetch</h3><p>Every node in the Chainlink DON pulls the same finished window of Federal Register publications from watched regulators: SEC, CFTC, Treasury, OCC, FDIC, Fed, FinCEN, OFAC, CFPB, IRS and the White House.</p></div>
+    <div class="card step"><span class="n">2</span><h3>Classify and agree</h3><p>A deterministic rules engine sorts documents into four categories. Final rules and executive orders mean BLOCK; proposals and notices mean REVIEW. Nodes must agree byte for byte. No LLM in the decision path.</p></div>
+    <div class="card step"><span class="n">3</span><h3>Write and enforce</h3><p>The signed result lands in RegGateStatus. Tokens ask it before each transfer: strict tokens pass only on OK, lenient tokens pass on anything but BLOCK.</p></div>
+  </div>
+
+  <h2>Fail-closed by design</h2>
+  <div class="card">
+    <ul class="rules">
+      <li><b>No report, or a stale one:</b> every category reads BLOCK.</li>
+      <li><b>API down, bad data, or nodes disagree:</b> nothing is written, so the contract goes stale and blocks.</li>
+      <li><b>A BLOCK latches:</b> it holds through later OK reports until a human reviewer clears it.</li>
+      <li><b>Cleared, but the same rule is still in the window:</b> REVIEW, never OK.</li>
+      <li><b>Only Chainlink's forwarder can write,</b> bound to this chain, with a strictly increasing timestamp to stop replays.</li>
+      <li><b>This page fails closed too:</b> if it cannot reach Sepolia, it shows UNKNOWN, never OK.</li>
+    </ul>
+  </div>
+
+  <footer>
+    <span>Flags regulatory publications for human review. Not legal advice. Built by NorthSchema.</span>
+    <span><a href="https://github.com/nctrnlsoul/reg-gate" target="_blank" rel="noopener noreferrer">Source on GitHub</a></span>
+  </footer>
+</div>
+
+<script>
+(() => {
+  'use strict';
+  const SEPOLIA_HEX = '0xaa36a7';
+  const DEFAULT_RPCS = ['https://ethereum-sepolia-rpc.publicnode.com', 'https://sepolia.drpc.org'];
+  const CATS = [
+    ['STABLECOINS', 'Stablecoins', 'Payment stablecoin issuance, reserves and the GENIUS Act.'],
+    ['TOKENIZED_SECURITIES', 'Tokenized securities', 'Tokenized funds, crypto asset investment contracts and SEC securities rules.'],
+    ['DIGITAL_ASSET_MARKETS', 'Digital asset markets', 'Crypto trading, custody, market structure and listings.'],
+    ['AML_SANCTIONS', 'AML and sanctions', 'Money laundering, Bank Secrecy Act, sanctions and mixers, where digital assets are involved.'],
+  ];
+  const STATUS = ['OK', 'REVIEW', 'BLOCK'];
+  const ADDR = /^0x[0-9a-fA-F]{40}$/;
+  const DOCNUM = /^\d{4}-\d{4,6}$/;
+  const $ = (id) => document.getElementById(id);
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+
+  // Optional ?rpc= override for local testing. Only https or localhost.
+  const override = new URLSearchParams(location.search).get('rpc');
+  const RPCS = override && /^(https:\/\/|http:\/\/(127\.0\.0\.1|localhost)(:\d+)?\/?$)/.test(override) ? [override] : DEFAULT_RPCS;
+
+  async function rpc(method, params) {
+    let lastErr;
+    for (const url of RPCS) {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 8000);
+      try {
+        const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }), signal: ctrl.signal });
+        const j = await r.json();
+        if (j.error) throw new Error(j.error.message || 'rpc error');
+        if (j.result == null) throw new Error('empty rpc result');
+        if (method === 'eth_call' && (typeof j.result !== 'string' || !/^0x[0-9a-fA-F]*$/.test(j.result))) throw new Error('bad call result');
+        return j.result;
+      } catch (e) { lastErr = e; } finally { clearTimeout(t); }
+    }
+    throw lastErr || new Error('no rpc');
+  }
+  const call = (to, data) => rpc('eth_call', [{ to, data }, 'latest']);
+  const arg8 = (n) => n.toString(16).padStart(64, '0');
+  const word = (hex, i) => {
+    const w = hex.slice(2 + 64 * i, 2 + 64 * (i + 1));
+    if (w.length !== 64) throw new Error('short return data');
+    return w;
+  };
+  const uint = (w) => BigInt('0x' + w);
+  const b32str = (w) => {
+    let s = '';
+    for (let i = 0; i < 64; i += 2) { const c = parseInt(w.slice(i, i + 2), 16); if (c === 0) break; s += String.fromCharCode(c); }
+    return s;
+  };
+  const SEL = { lastAsOf: '0xa89210cb', maxAge: '0x687043c5', statusOf: '0x6392d5aa', reportedStatus: '0x86106ee6',
+    latchInfo: '0xa31cbc7b', transfersAllowed: '0xb0660c3d' };
+
+  let chainNow = Math.floor(Date.now() / 1000);
+  function ago(sec) {
+    const d = Math.max(0, chainNow - sec);
+    if (d < 90) return 'just now';
+    if (d < 5400) return Math.round(d / 60) + ' min ago';
+    if (d < 172800) return Math.round(d / 3600) + ' h ago';
+    return Math.round(d / 86400) + ' days ago';
+  }
+  const fmt = (sec) => new Date(sec * 1000).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+
+  function setNet(ok, text) {
+    $('nettext').textContent = text;
+    $('netdot').className = 'dot' + (ok ? ' live' : '');
+  }
+  function banner(kind, html) {
+    const b = $('banner');
+    b.hidden = !kind; b.className = 'banner ' + (kind || '');
+    b.replaceChildren(); if (html) html.forEach((n) => b.append(n));
+  }
+
+  function renderCats(rows) {
+    const root = $('cats'); root.replaceChildren();
+    CATS.forEach(([, label, desc], i) => {
+      const r = rows ? rows[i] : null;
+      const status = r ? r.status : 'UNKNOWN';
+      const card = el('div', 'card');
+      const top = el('div', 'card-top');
+      top.append(el('h3', null, label), el('span', 'chip ' + status, status));
+      card.append(top, el('p', null, desc));
+      const meta = el('div', 'meta');
+      if (r && r.doc) {
+        meta.append(el('span', null, 'Trigger:'));
+        if (DOCNUM.test(r.doc)) {
+          const a = el('a', null, r.doc + ' on Federal Register');
+          a.href = 'https://www.federalregister.gov/d/' + r.doc; a.target = '_blank'; a.rel = 'noopener noreferrer';
+          meta.append(a);
+        } else meta.append(el('code', null, r.doc));
+      } else if (r && status === 'OK') meta.append(el('span', null, 'No matching publications in the window.'));
+      else if (!r) meta.append(el('span', null, 'Status unavailable. Treat as BLOCK.'));
+      if (r && r.latched) meta.append(el('span', 'badge', 'Latched until reviewer clears'));
+      if (r && r.reported !== r.status && r.fresh) meta.append(el('span', null, '(reported ' + r.reported + ')'));
+      card.append(meta);
+      root.append(card);
+    });
+  }
+
+  function renderTokens(list, allowed) {
+    const root = $('tokens'); root.replaceChildren();
+    if (!list || !list.length) { root.append(el('div', 'card', 'Demo tokens appear here after deployment.')); return; }
+    list.forEach((t, i) => {
+      const card = el('div', 'card');
+      const left = el('div');
+      left.append(el('div', 'tok-name', t.symbol), el('div', 'tok-sub',
+        (t.strict ? 'Strict: passes only on OK' : 'Lenient: blocked only on BLOCK') + ' · gated on ' + t.category.replace(/_/g, ' ').toLowerCase()));
+      const a = allowed ? allowed[i] : null;
+      const chip = el('span', 'chip ' + (a === true ? 'OK' : a === false ? 'BLOCK' : 'UNKNOWN'),
+        a === true ? 'TRANSFERS OPEN' : a === false ? 'TRANSFERS BLOCKED' : 'UNKNOWN');
+      card.append(left, chip);
+      root.append(card);
+    });
+  }
+
+  async function load() {
+    let dep;
+    try {
+      const r = await fetch('deployment.json', { cache: 'no-store' });
+      if (!r.ok) throw new Error('missing');
+      dep = await r.json();
+      if (!ADDR.test(dep.regGateStatus)) throw new Error('bad address');
+    } catch {
+      setNet(false, 'Not deployed yet');
+      banner('info', [el('span', null, 'The contract has not been deployed to Sepolia yet. Statuses appear here once it is.')]);
+      $('last').textContent = 'none'; $('until').textContent = 'n/a'; $('contract').textContent = 'n/a';
+      renderCats(null); renderTokens(null, null);
+      return;
+    }
+    const gate = dep.regGateStatus;
+    const link = $('contract');
+    link.textContent = gate.slice(0, 6) + '…' + gate.slice(-4);
+    link.href = 'https://sepolia.etherscan.io/address/' + gate;
+
+    try {
+      const chain = await rpc('eth_chainId', []);
+      if (chain.toLowerCase() !== SEPOLIA_HEX) throw new Error('wrong chain ' + chain);
+      const [lastHex, maxHex] = await Promise.all([call(gate, SEL.lastAsOf), call(gate, SEL.maxAge)]);
+      const last = Number(uint(word(lastHex, 0)));
+      const maxAge = Number(uint(word(maxHex, 0)));
+      // Judge freshness by chain time, the same clock the contract uses, not the viewer's clock.
+      const block = await rpc('eth_getBlockByNumber', ['latest', false]).catch(() => null);
+      chainNow = block && block.timestamp ? Number(BigInt(block.timestamp)) : Math.floor(Date.now() / 1000);
+      const fresh = last > 0 && chainNow <= last + maxAge;
+
+      const rows = await Promise.all(CATS.map(async (_, i) => {
+        const [s, rep, latch] = await Promise.all([
+          call(gate, SEL.statusOf + arg8(i)), call(gate, SEL.reportedStatus + arg8(i)), call(gate, SEL.latchInfo + arg8(i))]);
+        const st = Number(uint(word(s, 0)));
+        const rs = Number(uint(word(rep, 0)));
+        if (!(st in STATUS) || !(rs in STATUS)) throw new Error('bad status value');
+        return { status: STATUS[st], reported: STATUS[rs], doc: last ? b32str(word(rep, 1)) : '', latched: uint(word(latch, 0)) === 1n, fresh };
+      }));
+      const tokens = (dep.tokens || []).filter((t) => ADDR.test(t.address));
+      const allowed = await Promise.all(tokens.map(async (t) => {
+        try { return uint(word(await call(t.address, SEL.transfersAllowed), 0)) === 1n; } catch { return null; }
+      }));
+
+      setNet(true, 'Live on Sepolia');
+      $('last').textContent = last ? ago(last) + ' (' + fmt(last) + ')' : 'none yet';
+      $('until').textContent = last ? fmt(last + maxAge) : 'n/a';
+      if (!last) banner('warn', [el('strong', null, 'No report yet.'), el('span', null, 'Every category reads BLOCK until the workflow writes its first report.')]);
+      else if (!fresh) banner('warn', [el('strong', null, 'Stale data.'), el('span', null, 'The last report is older than the freshness limit, so every category reads BLOCK.')]);
+      else banner(null);
+      renderCats(rows); renderTokens(tokens, allowed);
+    } catch (e) {
+      setNet(false, 'Sepolia unreachable');
+      $('last').textContent = 'unknown'; $('until').textContent = 'unknown';
+      banner('warn', [el('strong', null, 'Could not read the chain.'), el('span', null, 'Showing UNKNOWN rather than guessing. Retrying shortly.')]);
+      renderCats(null); renderTokens(dep.tokens || [], null);
+    }
+  }
+
+  renderCats(null); renderTokens(null, null);
+  load();
+  setInterval(load, 60000);
+})();
+</script>
+</body>
+</html>

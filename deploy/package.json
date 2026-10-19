@@ -1,0 +1,10 @@
+{
+  "name": "reg-gate-deploy",
+  "version": "1.0.0",
+  "private": true,
+  "license": "MIT",
+  "description": "Sepolia deploy and demo scripts for Reg-Gate. Run from the project root so Bun loads .env.",
+  "dependencies": {
+    "viem": "2.34.0"
+  }
+}

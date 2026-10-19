@@ -6,5 +6,5 @@
   "chainSelectorName": "ethereum-testnet-sepolia",
   "isTestnet": true,
   "receiverAddress": "0x000000000000000000000000000000000000dEaD",
-  "gasLimit": "500000"
+  "gasLimit": "1000000"
 }

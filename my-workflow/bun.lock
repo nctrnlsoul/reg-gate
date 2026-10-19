@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "cre-custom-data-feed-ts",
+      "name": "reg-gate-workflow",
       "dependencies": {
         "@chainlink/cre-sdk": "^1.6.0",
         "viem": "2.34.0",
