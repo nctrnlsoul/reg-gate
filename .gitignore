@@ -1,0 +1,12 @@
+# secrets: never commit
+*.env
+.env
+
+# dependencies and build output
+node_modules/
+.cre_build_tmp.js
+dist/
+
+# foundry
+contracts/out/
+contracts/cache/

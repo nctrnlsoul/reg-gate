@@ -1,0 +1,10 @@
+{
+  "schedule": "0 0 */6 * * *",
+  "frBaseUrl": "https://www.federalregister.gov/api/v1/documents.json",
+  "lookbackDays": 14,
+  "perPage": 50,
+  "chainSelectorName": "ethereum-testnet-sepolia",
+  "isTestnet": true,
+  "receiverAddress": "0x000000000000000000000000000000000000dEaD",
+  "gasLimit": "500000"
+}

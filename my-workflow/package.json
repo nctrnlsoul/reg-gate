@@ -1,0 +1,20 @@
+{
+  "name": "reg-gate-workflow",
+  "version": "1.0.0",
+  "main": "dist/main.js",
+  "private": true,
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test regGate.test.ts workflow.test.ts"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@chainlink/cre-sdk": "^1.6.0",
+    "viem": "2.34.0",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  },
+  "description": "Reg-Gate: Chainlink CRE workflow that writes a fail-closed regulatory status on-chain"
+}
