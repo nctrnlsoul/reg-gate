@@ -1,0 +1,29 @@
+{
+  "network": "sepolia",
+  "chainId": 11155111,
+  "deployedAt": "2026-10-19T03:02:39.622Z",
+  "deployer": "0xECDD02BFa99E9C102455E9DE286a9Ae6b7049942",
+  "forwarder": "0x15fC6ae953E024d975e77382eEeC56A9101f9F88",
+  "maxAgeSeconds": 604800,
+  "reviewer": "0xECDD02BFa99E9C102455E9DE286a9Ae6b7049942",
+  "regGateStatus": {
+    "address": "0x03d0df9e8ef2785b241eacca9460a60dd4daa075",
+    "tx": "0x34188352a4dd42fe0f2ed892b0fc0599a442dc3f873d8c5a3fdc25c41c83c409"
+  },
+  "tokens": [
+    {
+      "symbol": "gUSD",
+      "category": "STABLECOINS",
+      "strict": false,
+      "address": "0x1495a7c7b7be43c0503a1dfd3a4d63d027d3b2de",
+      "tx": "0x934674525346d6afdcdba575798fc820864be5f8cbba1f43654b330f5734e90f"
+    },
+    {
+      "symbol": "gAST",
+      "category": "DIGITAL_ASSET_MARKETS",
+      "strict": true,
+      "address": "0x328c1c98b499485eaa499b3e3747a971a849dad9",
+      "tx": "0xc18f2670f31b85c72f6036e6c18da909416cab1f730cc19111cf9a9fad10200e"
+    }
+  ]
+}

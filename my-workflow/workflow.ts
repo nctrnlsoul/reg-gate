@@ -83,7 +83,11 @@ export const onCronTrigger = (runtime: Runtime<Config>, payload: CronPayload): s
 	if (!scheduled) throw new Error('Scheduled execution time is required')
 
 	const config = runtime.config
-	const asOf = Number(scheduled.seconds)
+	// Stamp the report with DON time (consensus, identical on every node), not the
+	// cron schedule. The schedule can be ahead of real time, e.g. a manually fired
+	// simulation reports the NEXT slot, and the contract rightly rejects a report
+	// from the future (FutureReport). Found on the first Sepolia broadcast, 2026-10-19.
+	const asOf = Math.floor(runtime.now().getTime() / 1000)
 	const window = computeWindow(asOf, config.lookbackDays)
 	const url = buildQueryUrl(config.frBaseUrl, window, config.perPage)
 	runtime.log(`Reg-Gate: querying Federal Register ${window.start}..${window.end}`)

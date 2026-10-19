@@ -1,0 +1,18 @@
+{
+  "chainId": 11155111,
+  "regGateStatus": "0x03d0df9e8ef2785b241eacca9460a60dd4daa075",
+  "tokens": [
+    {
+      "symbol": "gUSD",
+      "category": "STABLECOINS",
+      "strict": false,
+      "address": "0x1495a7c7b7be43c0503a1dfd3a4d63d027d3b2de"
+    },
+    {
+      "symbol": "gAST",
+      "category": "DIGITAL_ASSET_MARKETS",
+      "strict": true,
+      "address": "0x328c1c98b499485eaa499b3e3747a971a849dad9"
+    }
+  ]
+}

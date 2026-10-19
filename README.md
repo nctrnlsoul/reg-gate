@@ -8,7 +8,7 @@ fail-closed status on-chain. Token contracts check it before every transfer.
 
 - **Live status page:** https://nctrnlsoul.github.io/reg-gate/
 - **Contract on Sepolia:** see [`deploy/deployments/sepolia.json`](deploy/deployments/sepolia.json)
-- **Verification:** 50 workflow tests, 33 contract tests, every planted bug caught (details below)
+- **Verification:** 51 workflow tests, 33 contract tests, every planted bug caught (details below)
 
 > Reg-Gate flags regulatory publications for human review. It is not legal advice and
 > does not interpret the law.
@@ -105,7 +105,7 @@ my-workflow/
   workflow.ts           CRE wiring: cron -> fetch -> consensus -> report -> write
   regGate.test.ts       37 classifier tests
   workflow.test.ts      7 config and handler tests
-  e2e.test.ts           6 end-to-end tests: real onCronTrigger, mocked HTTP and chain
+  e2e.test.ts           7 end-to-end tests: real onCronTrigger, mocked HTTP and chain
 contracts/
   src/RegGateStatus.sol    on-chain receiver
   src/GatedToken.sol       demo ERC-20 gated on a category
@@ -169,7 +169,7 @@ and a 7-day `maxAge` so the status page stays readable between runs.
 | Suite | Tests | Planted bugs caught |
 |---|---|---|
 | Classifier (`regGate.test.ts`) | 37 | 9 of 9 |
-| Workflow end to end (`e2e.test.ts`) | 6 | 6 of 6 |
+| Workflow end to end (`e2e.test.ts`) | 7 | 6 of 6 |
 | Config and handler (`workflow.test.ts`) | 7 | |
 | RegGateStatus | 24 | 12 of 12 |
 | GatedToken | 9 | 7 of 7 |
@@ -184,6 +184,11 @@ Also verified by hand on 2026-10-18:
 - Agency slugs and document-type strings against the live Federal Register API.
 - The full on-chain path on a local Sepolia-ID chain: deploy, forwarder delivers the live
   report, a non-forwarder is rejected, `gUSD` transfers and `gAST` is blocked.
+- The first real Sepolia broadcast was **rejected by the contract**, exactly as designed:
+  the report carried the cron trigger's next scheduled slot (04:00 UTC) while the chain was
+  at 03:04 UTC, so `RegGateStatus` refused it with `FutureReport` and the forwarder logged
+  `result=false`. The workflow now stamps reports with DON consensus time
+  (`runtime.now()`), with a regression test that recreates the failure.
 - The status page in a headless browser across live, latched, stale, unreachable and
   not-deployed states, desktop and mobile, light and dark.
 

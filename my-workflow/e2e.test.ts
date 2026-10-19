@@ -21,8 +21,11 @@ const config: Config = {
 }
 
 const network = getNetwork({ chainFamily: 'evm', chainSelectorName: config.chainSelectorName, isTestnet: true })!
-const SCHEDULED = Date.UTC(2026, 9, 19, 2, 0, 0) / 1000 // window 2026-10-05..2026-10-18
+// DON time for the run. The window is 2026-10-05..2026-10-18.
+const NOW = Date.UTC(2026, 9, 19, 3, 4, 12) / 1000
+const SCHEDULED = NOW // the cron slot; one test below moves it ahead of NOW
 const payload = { scheduledExecutionTime: { seconds: BigInt(SCHEDULED), nanos: 0 } } as any
+const donTime = { timeProvider: () => NOW * 1000 }
 const idx = (c: (typeof CATEGORIES)[number]) => CATEGORIES.indexOf(c)
 
 // Shapes copied from the live documents the 2026-10-18 simulation flagged.
@@ -90,7 +93,7 @@ const decode = (payloadHex: Hex) =>
 describe('onCronTrigger end to end', () => {
 	test('live-shaped data produces the expected on-chain report', () => {
 		const seen = wire({ status: 200, body: JSON.stringify(LIVE_RESULTS) })
-		const runtime = newTestRuntime(null, undefined, config)
+		const runtime = newTestRuntime(null, donTime, config)
 
 		const summary = onCronTrigger(runtime as any, payload)
 
@@ -106,16 +109,28 @@ describe('onCronTrigger end to end', () => {
 
 		const [chainId, asOf, statuses, docs] = decode(seen.writes[0].payload)
 		expect(chainId).toBe(BigInt(network.chainId)) // replay guard: bound to Sepolia
-		expect(asOf).toBe(BigInt(SCHEDULED)) // replay guard: monotonic scheduled time
+		expect(asOf).toBe(BigInt(NOW)) // replay guard: monotonic DON time
 		expect([...statuses]).toEqual([Status.OK, Status.REVIEW, Status.REVIEW, Status.REVIEW])
 		expect(hexToString(docs[idx('TOKENIZED_SECURITIES')] as Hex, { size: 32 })).toBe('2026-20466') // SEC, not CFTC
 		expect(hexToString(docs[idx('AML_SANCTIONS')] as Hex, { size: 32 })).toBe('2026-20430')
 		expect(summary).toContain('STABLECOINS=OK')
 	})
 
+	test('report is stamped with DON time, not a cron slot that is still in the future', () => {
+		// Regression for the first Sepolia broadcast (2026-10-19): a manually fired
+		// simulation carried the NEXT slot (04:00Z) while the chain was at 03:04Z,
+		// so RegGateStatus rejected the report with FutureReport.
+		const seen = wire({ status: 200, body: JSON.stringify(LIVE_RESULTS) })
+		const runtime = newTestRuntime(null, donTime, config)
+		const futureSlot = { scheduledExecutionTime: { seconds: BigInt(NOW + 56 * 60), nanos: 0 } } as any
+		onCronTrigger(runtime as any, futureSlot)
+		const [, asOf] = decode(seen.writes[0].payload)
+		expect(asOf).toBe(BigInt(NOW))
+	})
+
 	test('HTTP failure writes nothing (contract staleness turns silence into BLOCK)', () => {
 		const seen = wire({ status: 503, body: 'Service Unavailable' })
-		const runtime = newTestRuntime(null, undefined, config)
+		const runtime = newTestRuntime(null, donTime, config)
 		expect(() => onCronTrigger(runtime as any, payload)).toThrow()
 		expect(seen.writes).toHaveLength(0)
 	})
@@ -124,14 +139,14 @@ describe('onCronTrigger end to end', () => {
 		// The dangerous case: a proxy or cache answers 5xx with valid-looking empty JSON.
 		// Only the status check stands between this and a fresh all-OK report.
 		const seen = wire({ status: 500, body: JSON.stringify({ count: 0 }) })
-		const runtime = newTestRuntime(null, undefined, config)
+		const runtime = newTestRuntime(null, donTime, config)
 		expect(() => onCronTrigger(runtime as any, payload)).toThrow('status 500')
 		expect(seen.writes).toHaveLength(0)
 	})
 
 	test('malformed body writes nothing', () => {
 		const seen = wire({ status: 200, body: '<html>rate limited</html>' })
-		const runtime = newTestRuntime(null, undefined, config)
+		const runtime = newTestRuntime(null, donTime, config)
 		expect(() => onCronTrigger(runtime as any, payload)).toThrow()
 		expect(seen.writes).toHaveLength(0)
 	})
@@ -139,7 +154,7 @@ describe('onCronTrigger end to end', () => {
 	test('a document outside the requested window writes nothing (do not trust the API)', () => {
 		const bad = { count: 1, results: [{ ...LIVE_RESULTS.results[0], publication_date: '2026-10-19' }] }
 		const seen = wire({ status: 200, body: JSON.stringify(bad) })
-		const runtime = newTestRuntime(null, undefined, config)
+		const runtime = newTestRuntime(null, donTime, config)
 		expect(() => onCronTrigger(runtime as any, payload)).toThrow()
 		expect(seen.writes).toHaveLength(0)
 	})
@@ -148,7 +163,7 @@ describe('onCronTrigger end to end', () => {
 		wire({ status: 200, body: JSON.stringify(LIVE_RESULTS) })
 		const evmMock = EvmMock.testInstance(network.chainSelector.selector)
 		evmMock.writeReport = () => ({ txStatus: TxStatus.REVERTED, errorMessage: 'reverted' })
-		const runtime = newTestRuntime(null, undefined, config)
+		const runtime = newTestRuntime(null, donTime, config)
 		expect(() => onCronTrigger(runtime as any, payload)).toThrow('Failed to write report')
 	})
 })

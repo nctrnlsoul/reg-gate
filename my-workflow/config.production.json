@@ -5,6 +5,6 @@
   "perPage": 50,
   "chainSelectorName": "ethereum-testnet-sepolia",
   "isTestnet": true,
-  "receiverAddress": "0x000000000000000000000000000000000000dEaD",
+  "receiverAddress": "0x03d0df9e8ef2785b241eacca9460a60dd4daa075",
   "gasLimit": "1000000"
 }
