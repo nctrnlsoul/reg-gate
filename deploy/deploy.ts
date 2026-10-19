@@ -67,7 +67,7 @@ async function deploy(name: 'RegGateStatus' | 'GatedToken', args: unknown[]) {
 	const receipt = await publicClient.waitForTransactionReceipt({ hash })
 	if (receipt.status !== 'success' || !receipt.contractAddress) throw new Error(`${name} deployment failed`)
 	console.log(`  ${name}: ${receipt.contractAddress}`)
-	return { address: receipt.contractAddress as Address, tx: hash }
+	return { address: receipt.contractAddress as Address, tx: hash, block: Number(receipt.blockNumber) }
 }
 
 console.log('Deploying RegGateStatus...')
@@ -86,10 +86,10 @@ const deployment: Deployment = {
 	forwarder,
 	maxAgeSeconds: maxAge,
 	reviewer,
-	regGateStatus: gate,
+	regGateStatus: { address: gate.address, tx: gate.tx },
 	tokens: [
-		{ symbol: 'gUSD', category: 'STABLECOINS', strict: false, ...gUSD },
-		{ symbol: 'gAST', category: 'DIGITAL_ASSET_MARKETS', strict: true, ...gAST },
+		{ symbol: 'gUSD', category: 'STABLECOINS', strict: false, address: gUSD.address, tx: gUSD.tx },
+		{ symbol: 'gAST', category: 'DIGITAL_ASSET_MARKETS', strict: true, address: gAST.address, tx: gAST.tx },
 	],
 }
 mkdirSync(dirname(DEPLOYMENT_FILE), { recursive: true })
@@ -107,9 +107,10 @@ for (const f of ['config.staging.json', 'config.production.json']) {
 writeJson(join(ROOT, 'docs', 'deployment.json'), {
 	chainId: SEPOLIA_CHAIN_ID,
 	regGateStatus: gate.address,
+	fromBlock: gate.block, // the status page reads contract events from here
 	tokens: deployment.tokens.map(({ symbol, category, strict, address }) => ({ symbol, category, strict, address })),
 })
 
 console.log(`\nDone. RegGateStatus: ${etherscan('address', gate.address)}`)
 console.log('Updated: my-workflow/config.*.json, docs/deployment.json, deploy/deployments/sepolia.json')
-console.log('\nNext: cre workflow simulate my-workflow --target staging-settings --broadcast')
+console.log('\nNext: cre workflow simulate my-workflow --target staging-settings --non-interactive --trigger-index 0 --broadcast')

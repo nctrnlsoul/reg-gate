@@ -138,7 +138,8 @@ deploy/
   status.ts       read the live status and simulate a transfer on each token (no key, no gas)
   address.ts      print the burner's public address for a faucet
 docs/
-  index.html      live status page (GitHub Pages)
+  index.html      live status page (GitHub Pages): statuses, the Federal Register documents
+                  behind them, why each token is open or blocked, and the on-chain event log
 ```
 
 ## Run it
