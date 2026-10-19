@@ -7,8 +7,8 @@ U.S. Federal Register publications, sorts them into four asset categories, and w
 fail-closed status on-chain. Token contracts check it before every transfer.
 
 - **Live status page:** https://nctrnlsoul.github.io/reg-gate/
-- **Contract on Sepolia:** see [`deploy/deployments/sepolia.json`](deploy/deployments/sepolia.json)
-- **Verification:** 51 workflow tests, 33 contract tests, every planted bug caught (details below)
+- **Contract on Sepolia:** [`0x03d0…a075`](https://sepolia.etherscan.io/address/0x03d0df9e8ef2785b241eacca9460a60dd4daa075) (full record in [`deploy/deployments/sepolia.json`](deploy/deployments/sepolia.json))
+- **Verification:** 58 workflow tests, 33 contract tests, every planted bug caught (details below)
 
 > Reg-Gate flags regulatory publications for human review. It is not legal advice and
 > does not interpret the law.
@@ -25,8 +25,9 @@ signal a token can act on, and it is built to fail safe: when it does not know, 
 ```
  Federal Register API          Chainlink DON (CRE)                     Sepolia
  (no key, public)         ┌──────────────────────────────┐     ┌────────────────────────┐
-         │                │ every node:                  │     │ RegGateStatus          │
-         └──── fetch ────►│  fetch fixed finished window │     │  forwarder-only writes │
+         │                │ trigger: cron or LatchCleared│◄────┤ emits LatchCleared     │
+         └──── fetch ────►│ every node fetches a fixed   │     │ RegGateStatus          │
+                          │  finished window             │     │  forwarder-only writes │
                           │  classify (deterministic)    │     │  chain + replay guards │
                           │ identical consensus          ├────►│  latch BLOCK           │
                           │ sign report                  │     │  stale => BLOCK        │
@@ -37,7 +38,7 @@ signal a token can act on, and it is built to fail safe: when it does not know, 
                                                              └──────────────────────────┘
 ```
 
-1. **Fetch.** On a cron schedule, every node queries the public Federal Register API for a
+1. **Fetch.** On a cron schedule (or when a reviewer clears a latch, see step 6), every node queries the public Federal Register API for a
    fixed lookback window ending the day before the run, so all nodes see the same finished
    day of publications.
 2. **Classify.** A deterministic rules engine ([`my-workflow/regGate.ts`](my-workflow/regGate.ts))
@@ -57,6 +58,12 @@ signal a token can act on, and it is built to fail safe: when it does not know, 
    [`RegGateStatus.sol`](contracts/src/RegGateStatus.sol).
 5. **Enforce.** [`GatedToken.sol`](contracts/src/GatedToken.sol) asks the gate before every
    transfer. Strict tokens pass only on `OK`; lenient tokens pass on anything but `BLOCK`.
+6. **Re-verify on override.** When a human reviewer clears a latched `BLOCK`, the contract
+   emits `LatchCleared`. A second CRE trigger (an EVM log trigger on that event) runs the
+   same check immediately. The clear was judged against a report up to one cron interval
+   old, so if a newer blocking rule has landed since, it re-latches in minutes instead of
+   leaving transfers open until the next scheduled run. The handler refuses logs from any
+   other contract, any other event, and logs removed by a reorg.
 
 ## Live result (2026-10-18)
 
@@ -76,6 +83,20 @@ securities. That rule now applies only to the SEC, with a regression test.
 With those statuses, the demo token `gUSD` (stablecoins, lenient) transfers freely and
 `gAST` (digital asset markets, strict) is blocked at REVIEW.
 
+## Live on Sepolia (2026-10-19)
+
+| | Address / transaction |
+|---|---|
+| RegGateStatus | [`0x03d0df9e8ef2785b241eacca9460a60dd4daa075`](https://sepolia.etherscan.io/address/0x03d0df9e8ef2785b241eacca9460a60dd4daa075) |
+| gUSD (stablecoins, lenient) | [`0x1495a7c7b7be43c0503a1dfd3a4d63d027d3b2de`](https://sepolia.etherscan.io/address/0x1495a7c7b7be43c0503a1dfd3a4d63d027d3b2de) |
+| gAST (digital asset markets, strict) | [`0x328c1c98b499485eaa499b3e3747a971a849dad9`](https://sepolia.etherscan.io/address/0x328c1c98b499485eaa499b3e3747a971a849dad9) |
+| First broadcast, **rejected** (`FutureReport`, forwarder `result=false`) | [`0x7cc3…de65`](https://sepolia.etherscan.io/tx/0x7cc3b7864da41343b7e72fd9ecb58c4e20d02ac46925b4a5277e2c4aa4efde65) |
+| Second broadcast, **accepted** | [`0x205d…bb0d`](https://sepolia.etherscan.io/tx/0x205ddf1792e113a3a3d8ffed037cf0c86e1ca3032f4da621346f564035adbb0d) |
+
+After the accepted report, on-chain: Stablecoins `OK`, the other three `REVIEW` with their
+Federal Register documents, `gUSD` transfers allowed, `gAST` transfers blocked. Check it
+yourself with `bun deploy/status.ts` (read-only, no key, no gas).
+
 ## Fail-closed design
 
 | Situation | Result |
@@ -89,7 +110,9 @@ With those statuses, the demo token `gUSD` (stablecoins, lenient) transfers free
 | More results than one page holds | Every category floored at `REVIEW` |
 | `BLOCK` reported | Latches through later `OK` reports until the reviewer clears it |
 | Reviewer cleared, same document still in window | `REVIEW`, never `OK` |
-| New blocking document after a clear | Latches again |
+| New blocking document after a clear | Latches again, right away: the clear itself triggers a re-check |
+| Trigger log from another contract, another event, or reorged out | Refused. Nothing fetched, nothing written. |
+| Cron and LatchCleared runs land at nearly the same time | Each report must carry a newer timestamp than the last one stored, so an out-of-order report is rejected. Safe either way; at worst one wasted transaction. |
 | Status page cannot reach the chain | Shows `UNKNOWN`, never `OK` |
 
 **Write access.** Reports are accepted only from the Chainlink forwarder, from the pinned
@@ -102,10 +125,10 @@ replay and same-chain replay of a failed report.
 ```
 my-workflow/
   regGate.ts            classifier, parser, query builder, report encoder (pure, deterministic)
-  workflow.ts           CRE wiring: cron -> fetch -> consensus -> report -> write
+  workflow.ts           CRE wiring: cron or LatchCleared -> fetch -> consensus -> report -> write
   regGate.test.ts       37 classifier tests
-  workflow.test.ts      7 config and handler tests
-  e2e.test.ts           7 end-to-end tests: real onCronTrigger, mocked HTTP and chain
+  workflow.test.ts      9 config and trigger-wiring tests
+  e2e.test.ts           12 end-to-end tests: real handlers for both triggers, mocked HTTP and chain
 contracts/
   src/RegGateStatus.sol    on-chain receiver
   src/GatedToken.sol       demo ERC-20 gated on a category
@@ -130,7 +153,12 @@ bun run test
 forge test
 
 # simulate against the live Federal Register (from the project root)
-cre workflow simulate my-workflow --target staging-settings
+# trigger 0 = cron, trigger 1 = LatchCleared
+cre workflow simulate my-workflow --target staging-settings --non-interactive --trigger-index 0
+
+# replay a real LatchCleared event (needs a clearLatch transaction on Sepolia)
+cre workflow simulate my-workflow --target staging-settings --non-interactive \
+  --trigger-index 1 --evm-tx-hash <clearLatch tx hash> --evm-event-index 0
 ```
 
 ## Deploy to Sepolia
@@ -142,7 +170,7 @@ key is never printed. The scripts refuse any chain other than Sepolia.
 bun install --cwd deploy
 bun deploy/address.ts          # public address to fund from a Sepolia faucet
 bun deploy/deploy.ts           # deploys RegGateStatus + gUSD + gAST, updates configs
-cre workflow simulate my-workflow --target staging-settings --broadcast
+cre workflow simulate my-workflow --target staging-settings --non-interactive --trigger-index 0 --broadcast
 bun deploy/status.ts           # on-chain status + which tokens can transfer
 ```
 
@@ -169,8 +197,9 @@ and a 7-day `maxAge` so the status page stays readable between runs.
 | Suite | Tests | Planted bugs caught |
 |---|---|---|
 | Classifier (`regGate.test.ts`) | 37 | 9 of 9 |
-| Workflow end to end (`e2e.test.ts`) | 7 | 6 of 6 |
-| Config and handler (`workflow.test.ts`) | 7 | |
+| Workflow end to end (`e2e.test.ts`) | 12 | 6 of 6 |
+| Config and trigger wiring (`workflow.test.ts`) | 9 | |
+| LatchCleared trigger (handler + wiring) | in the two rows above | 8 of 8 |
 | RegGateStatus | 24 | 12 of 12 |
 | GatedToken | 9 | 7 of 7 |
 
@@ -189,6 +218,11 @@ Also verified by hand on 2026-10-18:
   at 03:04 UTC, so `RegGateStatus` refused it with `FutureReport` and the forwarder logged
   `result=false`. The workflow now stamps reports with DON consensus time
   (`runtime.now()`), with a regression test that recreates the failure.
+- The LatchCleared trigger on a local Sepolia-ID chain: a real `BLOCK` report latches, the
+  reviewer clears it, the real `clearLatch` receipt log runs the handler, and the report it
+  produces (with a newer final rule in the mocked Federal Register response) re-latches the
+  category on delivery. The trigger topic is also checked in CI against the compiled
+  contract ABI, so renaming the event cannot leave the trigger listening for nothing.
 - The status page in a headless browser across live, latched, stale, unreachable and
   not-deployed states, desktop and mobile, light and dark.
 

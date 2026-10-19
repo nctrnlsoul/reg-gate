@@ -1,6 +1,12 @@
 // Reg-Gate CRE workflow.
 //
-// On a cron schedule:
+// Two triggers run the same check:
+//   - a cron schedule (the heartbeat), and
+//   - a LatchCleared event from RegGateStatus: when a human reviewer clears a BLOCK
+//     on-chain, the workflow re-verifies against the Federal Register right away
+//     instead of waiting up to one cron interval.
+//
+// Each check:
 //   1. Each DON node fetches U.S. Federal Register publications for a fixed,
 //      finished date window and classifies them (regGate.ts, deterministic).
 //   2. Nodes must return byte-identical results (identical consensus). Any
@@ -15,16 +21,19 @@ import {
 	consensusIdenticalAggregation,
 	type CronPayload,
 	cre,
+	type EVMLog,
 	getNetwork,
 	type HTTPSendRequester,
+	logTriggerConfig,
 	prepareReportRequest,
 	type Runtime,
 	TxStatus,
 } from '@chainlink/cre-sdk'
-import type { Address } from 'viem'
+import { type Address, type Hex, toEventSelector } from 'viem'
 import { z } from 'zod'
 import {
 	buildQueryUrl,
+	CATEGORIES,
 	classify,
 	computeWindow,
 	deserializeResult,
@@ -35,6 +44,10 @@ import {
 } from './regGate'
 
 const FR_PREFIX = 'https://www.federalregister.gov/api/v1/'
+
+/** RegGateStatus emits this when the reviewer clears a latched BLOCK. */
+export const LATCH_CLEARED_SIGNATURE = 'LatchCleared(uint8,bytes32,address)'
+export const LATCH_CLEARED_TOPIC: Hex = toEventSelector(LATCH_CLEARED_SIGNATURE)
 
 export const configSchema = z
 	.object({
@@ -78,10 +91,8 @@ const resolveNetwork = (config: Config) => {
 	return network
 }
 
-export const onCronTrigger = (runtime: Runtime<Config>, payload: CronPayload): string => {
-	const scheduled = payload.scheduledExecutionTime
-	if (!scheduled) throw new Error('Scheduled execution time is required')
-
+/** The check both triggers run: fetch, classify, agree, sign, write. */
+export const runCheck = (runtime: Runtime<Config>): string => {
 	const config = runtime.config
 	// Stamp the report with DON time (consensus, identical on every node), not the
 	// cron schedule. The schedule can be ahead of real time, e.g. a manually fired
@@ -125,8 +136,51 @@ export const onCronTrigger = (runtime: Runtime<Config>, payload: CronPayload): s
 	return summarize(result)
 }
 
+export const onCronTrigger = (runtime: Runtime<Config>, payload: CronPayload): string => {
+	if (!payload.scheduledExecutionTime) throw new Error('Scheduled execution time is required')
+	return runCheck(runtime)
+}
+
+/**
+ * A reviewer cleared a latched BLOCK. The clear was judged against the last report,
+ * which can be up to one cron interval old, so re-verify against the Federal Register
+ * now. If a new blocking document has landed since, it latches again immediately
+ * instead of leaving transfers open until the next scheduled run.
+ *
+ * The trigger filter already limits logs to our contract and event. The handler checks
+ * again anyway and refuses anything else (fail closed: a refused run writes nothing).
+ */
+export const onLatchCleared = (runtime: Runtime<Config>, log: EVMLog): string => {
+	const emitter = bytesToHex(log.address).toLowerCase()
+	if (emitter !== runtime.config.receiverAddress.toLowerCase()) {
+		throw new Error(`Refusing log from unexpected contract ${emitter}`)
+	}
+	const topic0 = log.topics[0] ? bytesToHex(log.topics[0]).toLowerCase() : 'none'
+	if (topic0 !== LATCH_CLEARED_TOPIC) throw new Error(`Refusing unexpected event ${topic0}`)
+	if (log.removed) throw new Error('Refusing a log that was removed by a reorg')
+
+	const category = log.topics[1] ? Number(BigInt(bytesToHex(log.topics[1]))) : -1
+	const name = CATEGORIES[category] ?? `category ${category}`
+	runtime.log(`Reg-Gate: reviewer cleared the latch on ${name}; re-verifying now`)
+	return runCheck(runtime)
+}
+
 export function initWorkflow(config: Config) {
-	resolveNetwork(config) // fail at startup, not mid-run, on a bad chain name
+	const network = resolveNetwork(config) // fail at startup, not mid-run, on a bad chain name
 	const cron = new cre.capabilities.CronCapability()
-	return [cre.handler(cron.trigger({ schedule: config.schedule }), onCronTrigger)]
+	const evm = new cre.capabilities.EVMClient(network.chainSelector.selector)
+	return [
+		// Order matters for `cre workflow simulate --trigger-index`: 0 = cron, 1 = LatchCleared.
+		cre.handler(cron.trigger({ schedule: config.schedule }), onCronTrigger),
+		cre.handler(
+			evm.logTrigger(
+				logTriggerConfig({
+					addresses: [config.receiverAddress as Hex],
+					topics: [[LATCH_CLEARED_TOPIC]],
+					confidence: 'SAFE',
+				}),
+			),
+			onLatchCleared,
+		),
+	]
 }

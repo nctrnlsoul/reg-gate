@@ -5,9 +5,9 @@
 import { describe, expect } from 'bun:test'
 import { getNetwork, TxStatus } from '@chainlink/cre-sdk'
 import { EvmMock, HttpActionsMock, newTestRuntime, REPORT_METADATA_HEADER_LENGTH, test } from '@chainlink/cre-sdk/test'
-import { bytesToHex, decodeAbiParameters, hexToString, type Hex } from 'viem'
+import { bytesToHex, decodeAbiParameters, hexToBytes, hexToString, pad, toHex, type Hex } from 'viem'
 import { CATEGORIES, Status } from './regGate'
-import { type Config, onCronTrigger } from './workflow'
+import { type Config, LATCH_CLEARED_TOPIC, onCronTrigger, onLatchCleared } from './workflow'
 
 const config: Config = {
 	schedule: '0 0 */6 * * *',
@@ -165,5 +165,73 @@ describe('onCronTrigger end to end', () => {
 		evmMock.writeReport = () => ({ txStatus: TxStatus.REVERTED, errorMessage: 'reverted' })
 		const runtime = newTestRuntime(null, donTime, config)
 		expect(() => onCronTrigger(runtime as any, payload)).toThrow('Failed to write report')
+	})
+})
+
+/** A LatchCleared log as the EVM log trigger delivers it. */
+function clearLog(over: Record<string, unknown> = {}) {
+	return {
+		address: hexToBytes(config.receiverAddress as Hex),
+		topics: [
+			hexToBytes(LATCH_CLEARED_TOPIC),
+			hexToBytes(pad(toHex(idx('DIGITAL_ASSET_MARKETS')), { size: 32 })), // category (indexed)
+			hexToBytes(pad('0x00000000000000000000000000000000000000aa', { size: 32 })), // reviewer (indexed)
+		],
+		data: hexToBytes(pad(toHex('2026-21128'), { size: 32, dir: 'right' })),
+		eventSig: hexToBytes(LATCH_CLEARED_TOPIC),
+		txHash: new Uint8Array(32).fill(1),
+		blockHash: new Uint8Array(32).fill(2),
+		txIndex: 0,
+		index: 0,
+		removed: false,
+		...over,
+	} as any
+}
+
+describe('onLatchCleared (reviewer override re-verifies immediately)', () => {
+	test('a reviewer clear triggers a fresh check and a new report', () => {
+		const seen = wire({ status: 200, body: JSON.stringify(LIVE_RESULTS) })
+		const runtime = newTestRuntime(null, donTime, config)
+		const summary = onLatchCleared(runtime as any, clearLog())
+		expect(seen.urls).toHaveLength(1)
+		expect(seen.writes).toHaveLength(1)
+		const [chainId, asOf, statuses] = decode(seen.writes[0].payload)
+		expect(chainId).toBe(BigInt(network.chainId))
+		expect(asOf).toBe(BigInt(NOW))
+		expect([...statuses]).toEqual([Status.OK, Status.REVIEW, Status.REVIEW, Status.REVIEW])
+		expect(summary).toContain('STABLECOINS=OK')
+	})
+
+	test('a log from any other contract is refused before fetching or writing', () => {
+		const seen = wire({ status: 200, body: JSON.stringify(LIVE_RESULTS) })
+		const runtime = newTestRuntime(null, donTime, config)
+		const spoof = clearLog({ address: hexToBytes('0x000000000000000000000000000000000000bEEF') })
+		expect(() => onLatchCleared(runtime as any, spoof)).toThrow('unexpected contract')
+		expect(seen.urls).toHaveLength(0)
+		expect(seen.writes).toHaveLength(0)
+	})
+
+	test('a different event from our contract is refused', () => {
+		const seen = wire({ status: 200, body: JSON.stringify(LIVE_RESULTS) })
+		const runtime = newTestRuntime(null, donTime, config)
+		const other = clearLog()
+		other.topics[0] = hexToBytes(pad('0x1234', { size: 32 }))
+		expect(() => onLatchCleared(runtime as any, other)).toThrow('unexpected event')
+		expect(() => onLatchCleared(runtime as any, clearLog({ topics: [] }))).toThrow('unexpected event')
+		expect(seen.writes).toHaveLength(0)
+	})
+
+	test('a log removed by a reorg is refused', () => {
+		const seen = wire({ status: 200, body: JSON.stringify(LIVE_RESULTS) })
+		const runtime = newTestRuntime(null, donTime, config)
+		expect(() => onLatchCleared(runtime as any, clearLog({ removed: true }))).toThrow('reorg')
+		expect(seen.writes).toHaveLength(0)
+	})
+
+	test('the re-check still fails closed: API error after a clear writes nothing', () => {
+		const seen = wire({ status: 503, body: JSON.stringify({ count: 0 }) })
+		const runtime = newTestRuntime(null, donTime, config)
+		expect(() => onLatchCleared(runtime as any, clearLog())).toThrow('status 503')
+		expect(seen.writes).toHaveLength(0)
 	})
 })

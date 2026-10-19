@@ -135,6 +135,7 @@
       <li><b>API down, bad data, or nodes disagree:</b> nothing is written, so the contract goes stale and blocks.</li>
       <li><b>A BLOCK latches:</b> it holds through later OK reports until a human reviewer clears it.</li>
       <li><b>Cleared, but the same rule is still in the window:</b> REVIEW, never OK.</li>
+      <li><b>A reviewer clear triggers a re-check:</b> the workflow listens for the LatchCleared event and re-verifies against the Federal Register at once, so a newer blocking rule re-latches in minutes, not hours.</li>
       <li><b>Only Chainlink's forwarder can write,</b> bound to this chain, with a strictly increasing timestamp to stop replays.</li>
       <li><b>This page fails closed too:</b> if it cannot reach Sepolia, it shows UNKNOWN, never OK.</li>
     </ul>
@@ -309,7 +310,7 @@
       $('last').textContent = last ? ago(last) + ' (' + fmt(last) + ')' : 'none yet';
       $('until').textContent = last ? fmt(last + maxAge) : 'n/a';
       if (!last) banner('warn', [el('strong', null, 'No report yet.'), el('span', null, 'Every category reads BLOCK until the workflow writes its first report.')]);
-      else if (!fresh) banner('warn', [el('strong', null, 'Stale data.'), el('span', null, 'The last report is older than the freshness limit, so every category reads BLOCK.')]);
+      else if (!fresh) banner('warn', [el('strong', null, 'Stale data, so everything reads BLOCK.'), el('span', null, 'No fresh report arrived within the freshness limit. That is the fail-closed design working: silence blocks transfers. It does not mean this page is broken.')]);
       else banner(null);
       renderCats(rows); renderTokens(tokens, allowed);
     } catch (e) {
