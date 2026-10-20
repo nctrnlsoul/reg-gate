@@ -5,7 +5,8 @@
   "private": true,
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "bun test"
+    "test": "bun test",
+    "build:page": "bun build-page.ts"
   },
   "license": "MIT",
   "dependencies": {

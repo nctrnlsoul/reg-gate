@@ -144,6 +144,7 @@ if (isMirror) {
 		regGateStatus: gate.address,
 		forwarder, // the status page reads rejected reports from the forwarder's log
 		fromBlock: gate.block, // the status page reads contract events from here
+		demoHolder: deployer, // holds the demo supply; the page simulates transfers from it (eth_call only)
 		tokens: tokens.map(({ symbol, category, strict, address }) => ({ symbol, category, strict, address })),
 		...(page.mirrors ? { mirrors: page.mirrors } : {}),
 	})

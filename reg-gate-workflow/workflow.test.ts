@@ -112,3 +112,11 @@ describe('onCronTrigger', () => {
 		expect(() => onCronTrigger(runtime as any, {} as any)).toThrow('Scheduled execution time is required')
 	})
 })
+
+describe('status page rules (docs/rules.js)', () => {
+	test('the committed docs/rules.js is exactly a fresh build of rules.ts', async () => {
+		const { buildRulesJs, RULES_JS } = await import('./build-page')
+		const norm = (s: string) => s.replace(/\r\n/g, '\n')
+		expect(norm(readFileSync(RULES_JS, 'utf-8'))).toBe(norm(await buildRulesJs()))
+	})
+})

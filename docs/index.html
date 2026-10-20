@@ -6,7 +6,7 @@
 <title>Reg-Gate</title>
 <meta name="description" content="Tokenized assets that check the Federal Register before they move. A Chainlink CRE workflow writes a fail-closed regulatory status on-chain.">
 <meta name="color-scheme" content="dark">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self' https: http://127.0.0.1:8545 http://localhost:8545; img-src 'self' data:; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self' https: http://127.0.0.1:8545 http://localhost:8545; img-src 'self' data:; base-uri 'none'; form-action 'none'">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="preload" href="fonts/Geist-Variable.woff2" as="font" type="font/woff2" crossorigin>
 <style>
@@ -17,7 +17,7 @@
   /* Primitives */
   :root {
     --p-night: #090B10; --p-night-2: #0E1117; --p-night-3: #131720; --p-line: #1C2230; --p-line-2: #262E3D;
-    --p-bone: #EEF1F6; --p-slate: #8D97A8; --p-dim: #5C6577;
+    --p-bone: #EEF1F6; --p-slate: #8D97A8; --p-dim: #7A8394;
     --p-blue: #4392E6; --p-blue-hi: #6AA8EE;
     --p-green: #3ED598; --p-amber: #F2BB4F; --p-red: #FF6B70;
   }
@@ -159,6 +159,90 @@
   .events .x { text-align: right; font-family: var(--mono); font-size: 12px; color: var(--accent-text); }
   .events .x:hover { text-decoration: underline; text-underline-offset: 3px; }
 
+  /* Why this status */
+  .whybtn { margin-top: 10px; display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--hair-2); background: transparent; color: var(--muted); font: 500 12.5px/1 var(--sans); cursor: pointer; transition: color .15s, border-color .15s; }
+  .whybtn:hover { color: var(--ink); border-color: var(--muted); }
+  .whybtn:focus-visible, .seg input:focus-visible + span, .simbtn:focus-visible, .copy:focus-visible, .field input:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
+  .whybtn svg { width: 10px; height: 10px; transition: transform .25s var(--ease-out); }
+  .whybtn[aria-expanded="true"] svg { transform: rotate(180deg); }
+  .trail { grid-column: 1 / -1; margin-top: -4px; border: 1px solid var(--hair); border-radius: 10px; background: var(--bg); padding: 6px 0; animation: drop .35s var(--ease-out); }
+  @keyframes drop { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+  .trow { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 16px; padding: 9px 16px; font-size: 13.5px; }
+  .trow + .trow { border-top: 1px solid rgba(28,34,48,.75); }
+  .trow dt { margin: 0; font: 500 11.5px/1.9 var(--mono); color: var(--faint); letter-spacing: .04em; text-transform: uppercase; }
+  .trow dd { margin: 0; color: var(--ink); overflow-wrap: anywhere; }
+  .trow dd .m { color: var(--muted); }
+  .trow dd q { quotes: "\201C" "\201D"; font-family: var(--mono); font-size: 12.5px; color: var(--accent-text); }
+  .trow dd a { color: var(--accent-text); font-family: var(--mono); font-size: 12.5px; }
+  .trow .arrow { color: var(--faint); padding: 0 6px; }
+  .st-OK, .st-REVIEW, .st-BLOCK, .st-UNKNOWN { font-weight: 600; letter-spacing: .03em; color: var(--tone); }
+  .st-OK { --tone: var(--ok); } .st-REVIEW { --tone: var(--review); } .st-BLOCK { --tone: var(--block); } .st-UNKNOWN { --tone: var(--unknown); }
+  .tfoot { padding: 10px 16px 6px; font-size: 12px; color: var(--faint); border-top: 1px solid var(--hair); margin-top: 4px; }
+  .tfoot code { font-family: var(--mono); color: var(--muted); }
+  .warnline { color: #FFC2C4; }
+
+  /* Simulator */
+  .sim { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: 20px; }
+  .panel { border: 1px solid var(--hair-2); border-radius: 14px; background: var(--surface); padding: 22px; }
+  .field { display: block; margin-bottom: 16px; }
+  .field > span, .legend { display: block; font-size: 12.5px; color: var(--muted); margin-bottom: 7px; }
+  .field input { width: 100%; height: 40px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--hair-2); background: var(--bg); color: var(--ink); font: 13.5px var(--mono); }
+  .field input[aria-invalid="true"] { border-color: rgba(255,107,112,.6); }
+  .seg { display: flex; gap: 8px; margin: 0 0 16px; padding: 0; border: 0; }
+  .seg label { flex: 1; }
+  .seg input { position: absolute; opacity: 0; pointer-events: none; }
+  .seg span { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; min-height: 44px; border-radius: 8px; border: 1px solid var(--hair-2); cursor: pointer; transition: border-color .15s, background .15s; }
+  .seg span b { font-size: 14px; font-weight: 600; }
+  .seg span small { font-size: 12px; color: var(--muted); }
+  .seg input:checked + span { border-color: var(--accent); background: rgba(67,146,230,.08); }
+  .simbtn { height: 40px; padding: 0 16px; border: 0; border-radius: 8px; background: var(--accent); color: var(--p-night); font: 600 14px var(--sans); cursor: pointer; }
+  .simbtn:hover { background: var(--accent-text); }
+  .simbtn[disabled] { opacity: .55; cursor: progress; }
+  .ferr { min-height: 18px; margin: 10px 0 0; font-size: 12.5px; color: #FFC2C4; }
+  .out { font-family: var(--mono); font-size: 12.5px; padding: 0; overflow: hidden; }
+  .out .ohead { display: flex; justify-content: space-between; gap: 12px; padding: 13px 18px; border-bottom: 1px solid var(--hair); color: var(--muted); font-size: 12px; }
+  .out .obody { padding: 16px 18px 18px; display: grid; gap: 10px; }
+  .out .oline { color: var(--muted); overflow-wrap: anywhere; }
+  .out .oline b { color: var(--ink); font-weight: 550; }
+  .verdict { margin-top: 4px; padding: 12px 14px; border-radius: 8px; border: 1px solid var(--hair-2); font-size: 13px; }
+  .verdict.okay { border-color: rgba(62,213,152,.3); background: rgba(62,213,152,.06); color: #CFF5E4; }
+  .verdict.rev { border-color: rgba(255,107,112,.32); background: rgba(255,107,112,.06); color: #FFD1D2; }
+  .verdict .plain { display: block; margin-top: 6px; font-family: var(--sans); font-size: 13px; color: var(--muted); }
+  .out.busy .verdict { opacity: .45; }
+
+  /* Networks */
+  .nets { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .net { border: 1px solid var(--hair-2); border-radius: 14px; background: var(--surface); overflow: hidden; }
+  .nethead { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--hair); }
+  .nethead b { font-size: 15px; font-weight: 600; }
+  .nethead span { font: 12px var(--mono); color: var(--faint); }
+  .netrows { padding: 6px 0; }
+  .netrow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; padding: 8px 20px; font-size: 13.5px; align-items: center; }
+  .netrow .d { font: 12px var(--mono); color: var(--faint); margin-left: 8px; }
+  .netfoot { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 12px 20px 16px; border-top: 1px solid var(--hair); font: 12px var(--mono); color: var(--faint); }
+  .netfoot a { color: var(--accent-text); }
+  .sync { margin: 16px 0 0; font-size: 13.5px; color: var(--muted); }
+  .sync b { color: var(--ink); font-weight: 560; }
+
+  /* Integrate */
+  .integ { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, .75fr); gap: 20px; align-items: start; }
+  .code { position: relative; border: 1px solid var(--hair-2); border-radius: 14px; background: #0B0E14; overflow: hidden; }
+  .code .chead { display: flex; justify-content: space-between; align-items: center; height: 42px; padding: 0 8px 0 18px; border-bottom: 1px solid var(--hair); font: 12px var(--mono); color: var(--muted); }
+  .copy { height: 28px; min-width: 64px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--hair-2); background: transparent; color: var(--muted); font: 500 12px var(--sans); cursor: pointer; }
+  .copy:hover { color: var(--ink); border-color: var(--muted); }
+  .code pre { margin: 0; padding: 16px 18px 20px; overflow-x: auto; font: 12.5px/1.7 var(--mono); color: #C9D2E0; }
+  .code .k { color: #8FB8F0; } .code .c { color: #7A8496; } .code .f { color: #E6EDF6; } .code .t { color: #9FD9C2; }
+  .ref { border: 1px solid var(--hair-2); border-radius: 14px; background: var(--surface); }
+  .ref dl { margin: 0; }
+  .ref .rr { padding: 14px 18px; }
+  .ref .rr + .rr { border-top: 1px solid var(--hair); }
+  .ref dt { font: 500 11.5px var(--mono); color: var(--faint); letter-spacing: .04em; text-transform: uppercase; margin-bottom: 6px; }
+  .ref dd { margin: 0; font-size: 13.5px; color: var(--ink); line-height: 1.6; }
+  .ref dd .m { color: var(--muted); }
+  .ref dd code { font-family: var(--mono); font-size: 12.5px; color: var(--accent-text); }
+  .ref dd a { font-family: var(--mono); font-size: 12.5px; color: var(--accent-text); }
+  .ref dd a:hover, .netfoot a:hover, .trow dd a:hover { text-decoration: underline; text-underline-offset: 3px; }
+
   footer { margin-top: 80px; border-top: 1px solid var(--hair); }
   footer .wrap { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding-top: 22px; padding-bottom: 40px; font-size: 13px; color: var(--faint); }
   footer a:hover { color: var(--muted); }
@@ -169,6 +253,7 @@
     .lane > :nth-child(1) { grid-area: cat; } .lane > :nth-child(2) { grid-area: doc; } .lane > :nth-child(3) { grid-area: chip; align-self: start; } .lane > :nth-child(4) { grid-area: tok; padding-top: 14px; border-top: 1px dashed var(--hair-2); }
     .events li { grid-template-columns: 120px minmax(0, 1fr); }
     .events .d, .events .x { grid-column: 2; text-align: left; }
+    .sim, .nets, .integ { grid-template-columns: 1fr; }
   }
   @media (max-width: 720px) {
     .wrap { padding: 0 16px; }
@@ -183,6 +268,8 @@
     .doc { display: none; }
     .events li { grid-template-columns: 1fr; gap: 2px; }
     .events .d, .events .x { grid-column: 1; }
+    .trow { grid-template-columns: 1fr; gap: 2px; }
+    .panel { padding: 18px; }
   }
   @media (prefers-reduced-motion: reduce) {
     .read.scanning::after { animation: none; opacity: 0; }
@@ -190,6 +277,9 @@
     .val, .tx, .tok .bar { transition: opacity .3s ease; transform: none !important; }
     .val.pending { animation: none; }
     .tx.rev.show, .call.flash { animation: none; }
+    .trail { animation: fade .3s ease; }
+    @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+    .whybtn svg { transition: none; }
   }
 </style>
 </head>
@@ -198,14 +288,14 @@
 
 <nav><div class="wrap">
   <a class="logo" href="#top"><svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="15" fill="#4392E6"/><path d="M19 50V14h15a10 10 0 0 1 0 20H19" fill="none" stroke="#fff" stroke-width="7" stroke-linejoin="round" stroke-linecap="round"/><path d="M33 34l13 16" stroke="#fff" stroke-width="7" stroke-linecap="round" opacity=".55"/></svg>Reg-Gate</a>
-  <div class="links"><a href="#status">Status</a><a id="nav-contract" href="#" target="_blank" rel="noopener noreferrer">Contract</a><a href="https://github.com/nctrnlsoul/reg-gate" target="_blank" rel="noopener noreferrer">Source</a></div>
+  <div class="links"><a href="#status">Status</a><a href="#simulate">Simulate</a><a href="#networks">Networks</a><a href="#integrate">Integrate</a><a id="nav-contract" href="#" target="_blank" rel="noopener noreferrer">Contract</a><a href="https://github.com/nctrnlsoul/reg-gate" target="_blank" rel="noopener noreferrer">Source</a></div>
   <span class="live" id="live"><i></i><span id="livetext">Connecting</span></span>
 </div></nav>
 
 <main class="wrap" id="top">
   <section class="hero">
     <div>
-      <p class="kicker"><b>Chainlink CRE</b><span></span>Federal Register<span></span>Ethereum Sepolia</p>
+      <p class="kicker"><b>Chainlink CRE</b><span></span>Federal Register<span></span>Ethereum Sepolia and Base Sepolia</p>
       <h1>Tokenized assets that check the Federal Register before they move.</h1>
       <p class="lede">New U.S. federal rules are classified into four asset categories and written on-chain as a fail-closed status. Token transfers read it first.</p>
       <div class="ctas"><a class="btn primary" id="cta-contract" href="#" target="_blank" rel="noopener noreferrer">View contract</a><a class="btn ghost" href="https://github.com/nctrnlsoul/reg-gate" target="_blank" rel="noopener noreferrer">Source on GitHub</a></div>
@@ -223,7 +313,7 @@
     <div class="metric"><div class="num"><span id="m1">…</span><small id="m1s">/ 4</small></div><div class="mlabel">Categories not clear</div></div>
     <div class="metric"><div class="num"><span id="m2">…</span><small id="m2s">/ 2</small></div><div class="mlabel">Demo tokens blocked</div></div>
     <div class="metric"><div class="num"><span id="m3">…</span><small id="m3s">days</small></div><div class="mlabel">Until silence reads BLOCK</div></div>
-    <div class="metric"><div class="num"><span id="m4">129</span></div><div class="mlabel">Tests, every planted bug caught</div></div>
+    <div class="metric"><div class="num"><span id="m4">136</span></div><div class="mlabel">Tests, every planted bug caught</div></div>
   </section>
 
   <section class="section" id="status">
@@ -232,8 +322,59 @@
     <div class="board" id="board"></div>
   </section>
 
+  <section class="section" id="simulate">
+    <div class="sh"><h2>Simulate a transfer</h2><p>eth_call on Sepolia. Nothing is signed or sent.</p></div>
+    <div class="sim">
+      <form class="panel" id="simform" novalidate>
+        <fieldset class="seg" id="simtokens"><legend class="legend">Token</legend></fieldset>
+        <label class="field"><span>Amount</span><input id="simamt" name="amount" inputmode="decimal" autocomplete="off" value="100" aria-describedby="simerr"></label>
+        <label class="field"><span>Recipient</span><input id="simto" name="to" autocomplete="off" spellcheck="false" value="0x000000000000000000000000000000000000bEEF" aria-describedby="simerr"></label>
+        <button class="simbtn" id="simbtn" type="submit">Run eth_call</button>
+        <p class="ferr" id="simerr" role="alert"></p>
+      </form>
+      <div class="panel out" id="simout" aria-live="polite">
+        <div class="ohead"><span id="simhead">transfer(address,uint256)</span><span id="simblock"></span></div>
+        <div class="obody" id="simbody"><div class="oline">Reading the token.</div></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="networks" hidden>
+    <div class="sh"><h2>One result, two chains</h2><p>Each report carries its own chain ID</p></div>
+    <div class="nets" id="nets"></div>
+    <p class="sync" id="sync"></p>
+  </section>
+
+  <section class="section" id="integrate">
+    <div class="sh"><h2>Gate a token on a category</h2><p>From contracts/src/GatedToken.sol</p></div>
+    <div class="integ">
+      <div class="code">
+        <div class="chead"><span>Solidity</span><button class="copy" id="copy" type="button">Copy</button></div>
+<pre id="snippet"><span class="k">interface</span> <span class="t">IRegGate</span> {
+    <span class="k">function</span> <span class="f">isAllowed</span>(<span class="t">uint8</span> category, <span class="t">bool</span> strict) <span class="k">external view returns</span> (<span class="t">bool</span>);
+    <span class="k">function</span> <span class="f">statusOf</span>(<span class="t">uint8</span> category) <span class="k">external view returns</span> (<span class="t">uint8</span>);
+}
+
+<span class="k">error</span> <span class="f">TransferBlockedByRegGate</span>(<span class="t">uint8</span> category, <span class="t">uint8</span> status);
+
+<span class="k">function</span> <span class="f">_transfer</span>(<span class="t">address</span> from, <span class="t">address</span> to, <span class="t">uint256</span> value) <span class="k">private</span> {
+    <span class="k">if</span> (!gate.<span class="f">isAllowed</span>(category, strict)) {
+        <span class="k">revert</span> <span class="f">TransferBlockedByRegGate</span>(category, gate.<span class="f">statusOf</span>(category));
+    }
+    <span class="c">// balance checks and the move, as in any ERC-20</span>
+}</pre>
+      </div>
+      <div class="ref"><dl>
+        <div class="rr"><dt>Categories</dt><dd><code>0</code> Stablecoins<br><code>1</code> Tokenized securities<br><code>2</code> Digital asset markets<br><code>3</code> AML and sanctions</dd></div>
+        <div class="rr"><dt>Status</dt><dd><code>0</code> OK, <code>1</code> REVIEW, <code>2</code> BLOCK.<br><span class="m">No report, a stale report, or a latched category reads BLOCK.</span></dd></div>
+        <div class="rr"><dt>Strict or lenient</dt><dd>Strict moves only on OK. Lenient stops only on BLOCK.</dd></div>
+        <div class="rr"><dt>Gate address</dt><dd id="gateaddrs"><span class="m">reading</span></dd></div>
+      </dl></div>
+    </div>
+  </section>
+
   <section class="section">
-    <div class="sh"><h2>Contract events</h2><p>RegGateStatus and the Chainlink forwarder</p></div>
+    <div class="sh"><h2>Contract events</h2><p>RegGateStatus and the Chainlink forwarder, Sepolia</p></div>
     <ol class="events" id="events"><li><span class="t">loading</span><span class="w">Reading events</span></li></ol>
   </section>
 </main>
@@ -288,9 +429,9 @@
   const override = new URLSearchParams(location.search).get('rpc');
   const RPCS = override && /^(https:\/\/|http:\/\/(127\.0\.0\.1|localhost)(:\d+)?\/?$)/.test(override) ? [override] : DEFAULT_RPCS;
 
-  async function rpc(method, params) {
+  async function rpc(method, params, urls) {
     let lastErr;
-    for (const url of RPCS) {
+    for (const url of urls || RPCS) {
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), 8000);
       try {
@@ -305,7 +446,15 @@
     }
     throw lastErr || new Error('no rpc');
   }
-  const call = (to, data) => rpc('eth_call', [{ to, data }, 'latest']);
+  const call = (to, data, urls) => rpc('eth_call', [{ to, data }, 'latest'], urls);
+  const BASE_SEPOLIA_HEX = '0x14a34';
+  const baseOverride = new URLSearchParams(location.search).get('baserpc');
+  const BASE_RPCS = baseOverride && /^(https:\/\/|http:\/\/(127\.0\.0\.1|localhost)(:\d+)?\/?$)/.test(baseOverride) ? [baseOverride] : ['https://base-sepolia-rpc.publicnode.com', 'https://sepolia.base.org'];
+
+  // The classifier itself, built from reg-gate-workflow/rules.ts. Used only to explain
+  // statuses; every status shown on this page comes from the contract.
+  let rules = null;
+  const rulesReady = import('./rules.js').then((m) => { rules = m; }, () => { rules = null; });
   const arg8 = (n) => n.toString(16).padStart(64, '0');
   const word = (hex, i) => { const w = hex.slice(2 + 64 * i, 2 + 64 * (i + 1)); if (w.length !== 64) throw new Error('short return data'); return w; };
   const uint = (w) => BigInt('0x' + w);
@@ -405,7 +554,7 @@
   function tryShowMetrics() {
     if (metricsShown || !metricsVisible || !pendingMetrics) return;
     metricsShown = true;
-    countUp($('m1'), pendingMetrics.notClear); countUp($('m2'), pendingMetrics.blocked); countUp($('m3'), pendingMetrics.age); countUp($('m4'), 129);
+    countUp($('m1'), pendingMetrics.notClear); countUp($('m2'), pendingMetrics.blocked); countUp($('m3'), pendingMetrics.age); countUp($('m4'), 136);
   }
   function setMetrics(m) {
     pendingMetrics = m;
@@ -420,6 +569,250 @@
     metricsVisible = entries.some((e) => e.isIntersecting);
     tryShowMetrics();
   }, { threshold: .2 });
+
+  // ---------- Why this status (rules.js recomputes; the contract decides)
+  const openWhy = new Set();
+  let trailSeq = 0;
+  const CAT_NAME = Object.fromEntries(CATS.map(([k, n]) => [k, n]));
+  const FIELD = { title: 'in the title', abstract: 'in the abstract', agency: '' };
+  const agencyLabel = (slug) => AGENCY_SHORT[slug] || slug || 'an unnamed agency';
+  const isoDay = (sec) => new Date((Math.floor(sec / 86400) - 1) * 86400000).toISOString().slice(0, 10);
+  const fmtIso = (d) => (/^\d{4}-\d{2}-\d{2}$/.test(d || '') ? new Date(d + 'T00:00:00Z').toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }) : 'unknown');
+  const stSpan = (name) => el('span', 'st-' + name, name);
+  const arrow = () => el('span', 'arrow', '→');
+  const fullDocs = new Map();
+  function loadFullDoc(num) {
+    if (fullDocs.has(num)) return fullDocs.get(num);
+    const p = (async () => {
+      const f = ['document_number', 'title', 'type', 'publication_date', 'effective_on', 'abstract', 'agencies'].map((x) => 'fields%5B%5D=' + x).join('&');
+      const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 8000);
+      try {
+        const resp = await fetch(FR_API + num + '.json?' + f, { signal: ctrl.signal });
+        if (!resp.ok) throw new Error('status ' + resp.status);
+        const obj = await resp.json();
+        // The same strict parser the workflow uses: a surprise here means no explanation, not a wrong one.
+        const doc = rules.parseFederalRegisterResponse(JSON.stringify({ count: 1, results: [obj] })).documents[0];
+        if (doc.documentNumber !== num) throw new Error('wrong document');
+        return doc;
+      } catch { fullDocs.delete(num); return null; } finally { clearTimeout(t); }
+    })();
+    fullDocs.set(num, p);
+    return p;
+  }
+  async function fillTrail(box, key, i, r, state) {
+    const seq = String(++trailSeq); box.dataset.seq = seq;
+    box.replaceChildren(el('div', 'tfoot', 'Recomputing.'));
+    await rulesReady;
+    const doc = rules && r.doc && DOCNUM.test(r.doc) ? await loadFullDoc(r.doc) : null;
+    if (box.dataset.seq !== seq) return;
+    const dl = el('dl');
+    const row = (label, ...nodes) => { const w = el('div', 'trow'), dd = el('dd'); dd.append(...nodes); w.append(el('dt', null, label), dd); dl.append(w); };
+    const asOf = isoDay(r.last);
+    let warn = null;
+    if (!r.doc) {
+      row('Window', 'Federal Register publications through ' + fmtIso(asOf) + ', plus final rules taking effect by then.');
+      if (r.reported === 'OK') row('Match', 'Nothing in scope matched ' + CAT_NAME[key] + '.');
+      else row('Match', el('span', 'm', 'No single document is recorded. The result set was larger than one page, so every category was floored at REVIEW.'));
+    } else if (!doc) {
+      row('Document', ext('https://www.federalregister.gov/d/' + r.doc, r.doc));
+      row('Explain', el('span', 'm', rules ? 'The Federal Register did not answer just now. The status comes straight from the contract either way.' : 'The rules could not load. The status comes straight from the contract either way.'));
+    } else {
+      const e = rules.explain(doc, asOf);
+      row('Document', ext('https://www.federalregister.gov/d/' + doc.documentNumber, doc.documentNumber), el('span', 'm', ', ' + doc.type.toLowerCase() + ', published ' + fmtIso(doc.publicationDate)));
+      row('Agency', e.agencies.length ? e.agencies.map((a) => agencyLabel(a.slug) + (a.watched ? ', watched' : ', not watched')).join('; ') : 'None listed, so it stays in scope.');
+      const mine = e.evidence.filter((x) => x.category === key);
+      if (!mine.length) { row('Match', el('span', 'm', 'Under the current rules this document does not match ' + CAT_NAME[key] + '.')); warn = true; }
+      for (const ev of mine) {
+        const what = ev.field === 'agency' ? [agencyLabel(ev.term) + ' is an AML agency'] : [el('q', null, ev.term), ' ' + FIELD[ev.field]];
+        row('Match', ...what, arrow(), CAT_NAME[key], ev.note && ev.field !== 'agency' ? el('span', 'm', ' (' + ev.note + ')') : '');
+      }
+      const others = e.categories.filter((c) => c !== key).map((c) => CAT_NAME[c]);
+      if (others.length) row('Also', 'Counts for ' + others.join(', ') + ' too.');
+      row('Exclusions', e.outcome === 'informational' ? el('span', 'm', 'Informational (' + (e.informational === 'sro-filing' ? 'an exchange rule filing' : 'a withdrawn proposal') + '), so it should not move a status.') : 'Not an exchange rule filing, not a withdrawn proposal.');
+      if (e.outcome === 'matched') {
+        const reason = e.severityReason.charAt(0).toUpperCase() + e.severityReason.slice(1);
+        row('Severity', reason, arrow(), stSpan(STATUS[e.severity]));
+        if (STATUS[e.severity] !== r.reported) warn = true;
+      } else warn = true;
+    }
+    const enforced = [' Enforced ', stSpan(r.status)];
+    let why = '';
+    if (r.latched) why = ', latched until a reviewer clears it.';
+    else if (!r.fresh) why = ', because the report is stale.';
+    else if (r.reported === 'BLOCK' && r.status === 'REVIEW') why = ', a reviewer acknowledged this document.';
+    else why = '.';
+    row('On-chain', 'Reported ', stSpan(r.reported), '.', ...enforced, why);
+    for (const t of (state.tokens || []).filter((x) => x.category === key)) {
+      const open = t.allowed === true;
+      row('Token', t.symbol + (t.strict ? ' is strict, so it moves only on OK. ' : ' is lenient, so it stops only on BLOCK. '), t.allowed == null ? 'Unreadable, treat as blocked.' : 'Transfers are ' + (open ? 'open.' : 'blocked.'));
+    }
+    if (warn) row('Note', el('span', 'warnline', 'This recomputation differs from the stored report. The contract enforces the report. A difference means the rules changed after that report or the result set was truncated.'));
+    const foot = el('div', 'tfoot');
+    if (rules) foot.append('Recomputed in your browser by ', el('code', null, 'rules.js'), ', a build of the classifier every DON node runs.');
+    else foot.append('Recomputation unavailable. Every status above comes from the contract.');
+    box.replaceChildren(dl, foot);
+  }
+
+  // ---------- Transfer simulator (eth_call only)
+  let simTokens = [], simHolder = null, simSetup = false;
+  const SIM_ERR = { '0xf87edc4d': 'TransferBlockedByRegGate', '0xf4d678b8': 'InsufficientBalance', '0xd92e233d': 'ZeroAddress' };
+  function parseAmount(v) {
+    const m = /^(\d{1,12})(?:\.(\d{1,18}))?$/.exec(v);
+    if (!m) return null;
+    return BigInt(m[1]) * 10n ** 18n + BigInt((m[2] || '').padEnd(18, '0'));
+  }
+  async function callRaw(tx, block) {
+    let lastErr;
+    for (const url of RPCS) {
+      const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 8000);
+      try {
+        const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, signal: ctrl.signal,
+          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_call', params: [tx, block] }) });
+        const j = await r.json();
+        if (j.error) {
+          const d = j.error.data, hex = typeof d === 'string' ? d : d && typeof d.data === 'string' ? d.data : null;
+          if (hex && /^0x[0-9a-fA-F]*$/.test(hex)) return { reverted: true, data: hex };
+          if (/revert/i.test(String(j.error.message || ''))) return { reverted: true, data: '0x' };
+          throw new Error(j.error.message || 'rpc error');
+        }
+        if (typeof j.result === 'string' && /^0x[0-9a-fA-F]*$/.test(j.result)) return { reverted: false, data: j.result };
+        throw new Error('bad result');
+      } catch (e) { lastErr = e; } finally { clearTimeout(t); }
+    }
+    throw lastErr || new Error('no rpc');
+  }
+  function simBody(...nodes) { $('simbody').replaceChildren(...nodes); }
+  function setupSim(dep) {
+    if (simSetup) return; simSetup = true;
+    simTokens = (dep.tokens || []).filter((t) => ADDR.test(t.address) && /^[A-Za-z0-9]{1,11}$/.test(t.symbol || ''));
+    simHolder = ADDR.test(dep.demoHolder || '') ? dep.demoHolder : null;
+    const fs = $('simtokens');
+    const preferred = simTokens.some((t) => t.symbol === 'gAST') ? 'gAST' : simTokens[0] && simTokens[0].symbol;
+    for (const t of simTokens) {
+      const lab = el('label'), inp = el('input'), sp = el('span');
+      inp.type = 'radio'; inp.name = 'token'; inp.value = t.address; inp.checked = t.symbol === preferred;
+      sp.append(el('b', null, t.symbol), el('small', null, (CAT_NAME[t.category] || t.category) + ', ' + (t.strict ? 'strict' : 'lenient')));
+      lab.append(inp, sp); fs.append(lab);
+    }
+    $('simform').addEventListener('submit', (ev) => { ev.preventDefault(); runSim(); });
+    for (const id of ['simamt', 'simto']) $(id).addEventListener('input', () => { $(id).removeAttribute('aria-invalid'); $('simerr').textContent = ''; });
+    if (!simTokens.length || !simHolder) { $('simbtn').disabled = true; simBody(el('div', 'oline', 'No demo token is recorded for this deployment.')); return; }
+    runSim();
+  }
+  async function runSim() {
+    const err = $('simerr'), amtIn = $('simamt'), toIn = $('simto');
+    err.textContent = ''; amtIn.removeAttribute('aria-invalid'); toIn.removeAttribute('aria-invalid');
+    const amtText = amtIn.value.trim(), amt = parseAmount(amtText), to = toIn.value.trim();
+    if (amt === null) { amtIn.setAttribute('aria-invalid', 'true'); err.textContent = 'Amount must be a number, up to 18 decimal places.'; amtIn.focus(); return; }
+    if (!ADDR.test(to)) { toIn.setAttribute('aria-invalid', 'true'); err.textContent = 'Recipient must be 0x followed by 40 hex characters.'; toIn.focus(); return; }
+    const sel = document.querySelector('#simtokens input:checked');
+    const t = simTokens.find((x) => sel && x.address === sel.value) || simTokens[0];
+    const btn = $('simbtn'), out = $('simout');
+    btn.disabled = true; out.classList.add('busy');
+    try {
+      const block = await rpc('eth_blockNumber', []);
+      const data = '0xa9059cbb' + to.slice(2).toLowerCase().padStart(64, '0') + amt.toString(16).padStart(64, '0');
+      const res = await callRaw({ from: simHolder, to: t.address, data }, block);
+      $('simblock').textContent = 'block ' + Number(BigInt(block)).toLocaleString('en-US');
+      $('simhead').textContent = t.symbol + '.transfer(address,uint256)';
+      const lines = [];
+      const l1 = el('div', 'oline'); l1.append('call  ', el('b', null, t.symbol + '.transfer'), '(' + shortAddr(to) + ', ' + amtText + ' ' + t.symbol + ')');
+      const l2 = el('div', 'oline'); l2.append('from  ' + shortAddr(simHolder) + ', the demo deployer, holds the supply');
+      const l3 = el('div', 'oline'); l3.append('token ', ext('https://sepolia.etherscan.io/address/' + t.address, shortAddr(t.address)));
+      lines.push(l1, l2, l3);
+      const v = el('div', 'verdict');
+      const cat = CAT_NAME[t.category] || t.category;
+      if (!res.reverted) {
+        const ok = res.data.length >= 66 && BigInt(res.data.slice(0, 66)) === 1n;
+        v.className = 'verdict ' + (ok ? 'okay' : 'rev');
+        v.append(el('b', null, ok ? 'returns true' : 'returns ' + res.data.slice(0, 18)));
+        v.append(el('span', 'plain', ok ? cat + ' allows it: ' + t.symbol + ' is ' + (t.strict ? 'strict and the status is OK.' : 'lenient and the status is not BLOCK.') : 'Unexpected return value. Treat as not transferred.'));
+      } else {
+        v.className = 'verdict rev';
+        const name = SIM_ERR[res.data.slice(0, 10).toLowerCase()];
+        if (name === 'TransferBlockedByRegGate' && res.data.length >= 138) {
+          const c = Number(uint(res.data.slice(10, 74))), st = STATUS[Number(uint(res.data.slice(74, 138)))] || 'unknown';
+          v.append(el('b', null, 'reverts TransferBlockedByRegGate(' + c + ', ' + st + ')'));
+          v.append(el('span', 'plain', (CATS[c] ? CATS[c][1] : 'Category ' + c) + ' is ' + st + '. ' + t.symbol + (t.strict ? ' is strict, so it moves only on OK.' : ' is lenient, so it stops only on BLOCK.')));
+        } else if (name === 'InsufficientBalance') {
+          v.append(el('b', null, 'reverts InsufficientBalance()'));
+          v.append(el('span', 'plain', 'The gate let it through; the sender just holds less than that amount.'));
+        } else if (name === 'ZeroAddress') {
+          v.append(el('b', null, 'reverts ZeroAddress()'));
+          v.append(el('span', 'plain', 'The recipient is the zero address.'));
+        } else {
+          v.append(el('b', null, 'reverts'));
+          v.append(el('span', 'plain', 'No reason was returned. Treat as not transferred.'));
+        }
+      }
+      lines.push(v);
+      simBody(...lines);
+    } catch {
+      $('simblock').textContent = '';
+      simBody(el('div', 'oline', 'Sepolia did not answer. Nothing was simulated; try again in a moment.'));
+    } finally { btn.disabled = false; out.classList.remove('busy'); }
+  }
+
+  // ---------- Networks: the same status on each chain, read from each chain
+  async function readChain(gate, urls, chainHex) {
+    const chain = await rpc('eth_chainId', [], urls);
+    if (String(chain).toLowerCase() !== chainHex) throw new Error('wrong chain');
+    const [lastHex, maxHex, blk] = await Promise.all([call(gate, SEL.lastAsOf, urls), call(gate, SEL.maxAge, urls), rpc('eth_getBlockByNumber', ['latest', false], urls)]);
+    const last = Number(uint(word(lastHex, 0))), maxAge = Number(uint(word(maxHex, 0))), now = Number(BigInt(blk.timestamp));
+    const rows = await Promise.all(CATS.map(async (_, i) => {
+      const [s, rep] = await Promise.all([call(gate, SEL.statusOf + arg8(i), urls), call(gate, SEL.reportedStatus + arg8(i), urls)]);
+      const st = Number(uint(word(s, 0))), rs = Number(uint(word(rep, 0)));
+      if (!(st in STATUS) || !(rs in STATUS)) throw new Error('bad status value');
+      return { status: STATUS[st], reported: STATUS[rs], doc: last ? b32str(word(rep, 1)) : '' };
+    }));
+    return { last, maxAge, fresh: last > 0 && now <= last + maxAge, rows };
+  }
+  function netCard(n) {
+    const card = el('div', 'net');
+    const head = el('div', 'nethead'); head.append(el('b', null, n.name), el('span', null, 'chain ' + n.chainId));
+    const rows = el('div', 'netrows');
+    CATS.forEach(([, label], i) => {
+      const r = n.data ? n.data.rows[i] : null, st = r ? r.status : 'UNKNOWN';
+      const row = el('div', 'netrow'), left = el('span', null, label);
+      if (r && r.doc) left.append(el('span', 'd', r.doc));
+      row.append(left, el('span', 'chip t-' + st, st));
+      rows.append(row);
+    });
+    const foot = el('div', 'netfoot');
+    foot.append(el('span', null, n.data ? (n.data.last ? 'last report ' + fmt(n.data.last) + (n.data.fresh ? '' : ', stale') : 'no report yet') : 'unreachable, treat as BLOCK'),
+      ext(n.explorer + '/address/' + n.gate, shortAddr(n.gate)));
+    card.append(head, rows, foot);
+    return card;
+  }
+  async function loadNetworks(dep, state) {
+    const m = Array.isArray(dep.mirrors) ? dep.mirrors.find((x) => x && x.chainId === 84532 && ADDR.test(x.regGateStatus)) : null;
+    if (!m) { $('networks').hidden = true; return; }
+    $('networks').hidden = false;
+    let mdata = null;
+    try { mdata = await readChain(m.regGateStatus, BASE_RPCS, BASE_SEPOLIA_HEX); } catch { mdata = null; }
+    const primary = { name: 'Ethereum Sepolia', chainId: 11155111, gate: dep.regGateStatus, explorer: 'https://sepolia.etherscan.io', data: state.rows ? { last: state.last, fresh: state.fresh, rows: state.rows } : null };
+    const mirror = { name: 'Base Sepolia', chainId: 84532, gate: m.regGateStatus, explorer: 'https://sepolia.basescan.org', data: mdata };
+    $('nets').replaceChildren(netCard(primary), netCard(mirror));
+    const sync = $('sync'); sync.replaceChildren();
+    if (!primary.data || !mirror.data) { sync.append(el('b', null, 'One chain is unreachable right now. '), 'Its contract keeps enforcing its last report until that report goes stale.'); return; }
+    const diff = CATS.filter((_, i) => primary.data.rows[i].reported !== mirror.data.rows[i].reported || primary.data.rows[i].doc !== mirror.data.rows[i].doc).map(([, n]) => n);
+    if (!diff.length) sync.append(el('b', null, 'In sync. '), 'Same statuses and documents on both chains. Each chain is written only when its own copy is out of date, so report times can differ.');
+    else sync.append(el('b', null, 'Differs on ' + diff.join(', ') + '. '), 'Each chain is checked on its own; the next run writes to the one that is behind.');
+  }
+
+  // ---------- Integrate
+  function setGateAddrs(dep) {
+    const box = $('gateaddrs'); box.replaceChildren();
+    box.append('Ethereum Sepolia ', ext('https://sepolia.etherscan.io/address/' + dep.regGateStatus, shortAddr(dep.regGateStatus)));
+    const m = Array.isArray(dep.mirrors) ? dep.mirrors.find((x) => x && x.chainId === 84532 && ADDR.test(x.regGateStatus)) : null;
+    if (m) box.append(el('br'), 'Base Sepolia ', ext('https://sepolia.basescan.org/address/' + m.regGateStatus, shortAddr(m.regGateStatus)));
+  }
+  $('copy').addEventListener('click', async () => {
+    const b = $('copy');
+    try { await navigator.clipboard.writeText($('snippet').textContent); b.textContent = 'Copied'; }
+    catch { b.textContent = 'Select to copy'; }
+    setTimeout(() => { b.textContent = 'Copy'; }, 1600);
+  });
 
   // ---------- Board
   function gateSvg() {
@@ -460,6 +853,22 @@
       }
       if (r && r.latched) d.append(el('span', 'flag', 'Latched until a reviewer clears it'));
       else if (r && !r.fresh && r.last) d.append(el('span', 'flag', 'BLOCK because the report is stale'));
+      let trail = null;
+      if (r && r.last) {
+        const btn = el('button', 'whybtn');
+        btn.type = 'button';
+        btn.setAttribute('aria-expanded', openWhy.has(key) ? 'true' : 'false');
+        btn.setAttribute('aria-controls', 'why-' + key);
+        btn.append('Why ' + status, svg('0 0 10 10', [['path', { d: 'M1.5 3.5L5 7l3.5-3.5', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.6', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }]]));
+        btn.addEventListener('click', () => {
+          const open = btn.getAttribute('aria-expanded') !== 'true';
+          btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+          if (open) { openWhy.add(key); trail.hidden = false; fillTrail(trail, key, i, r, state); }
+          else { openWhy.delete(key); trail.hidden = true; }
+        });
+        d.append(el('br'), btn);
+        trail = el('div', 'trail'); trail.id = 'why-' + key; trail.hidden = !openWhy.has(key);
+      }
       const chip = el('span', 'chip t-' + status, status);
       const toks = state && state.tokens ? state.tokens.filter((t) => t.category === key) : [];
       let g;
@@ -478,6 +887,7 @@
         }
       }
       lane.append(c, d, chip, g);
+      if (trail) { lane.append(trail); if (!trail.hidden) fillTrail(trail, key, i, r, state); }
       root.append(lane);
     });
     requestAnimationFrame(tryAnimateGates);
@@ -582,6 +992,7 @@
     const gate = dep.regGateStatus;
     const scan = 'https://sepolia.etherscan.io/address/' + gate;
     $('nav-contract').href = scan; $('cta-contract').href = scan;
+    setGateAddrs(dep);
     $('read-addr').textContent = shortAddr(gate);
 
     let state;
@@ -632,6 +1043,8 @@
     }
     firstRun = false;
 
+    setupSim(dep);
+    loadNetworks(dep, state);
     if (state.rows) {
       loadTitles(state.rows.map((r) => r.doc).filter(Boolean)).then((did) => { if (did && lastState === state) renderBoard(state); });
       const key = gate + '|' + state.last + '|' + state.rows.map((r) => (r.latched ? 1 : 0)).join('');

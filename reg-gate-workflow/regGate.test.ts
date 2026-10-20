@@ -10,9 +10,11 @@ import {
 	deserializeResult,
 	docToBytes32,
 	encodeReport,
+	explain,
 	type FrDocument,
 	informationalReason,
 	isOutOfScope,
+	isProcedural,
 	parseFederalRegisterResponse,
 	serializeResult,
 	severityFor,
@@ -489,5 +491,111 @@ describe('writeDecision (heartbeat: skip only when sure nothing changes)', () =>
 		const twoDays = held({ maxAge: 48n * H, lastAsOf: NOW - 24n * H })
 		expect(writeDecision(twoDays as any, r, NOW, 168n * H).write).toBe(true)
 		expect(writeDecision(held({ maxAge: 0n }) as any, r, NOW, 24n * H).write).toBe(true)
+	})
+})
+
+describe('explain (the status page runs this; it must never disagree with classify)', () => {
+	const W_END = W.end
+	const parse1 = (o: Record<string, unknown>) => parseFederalRegisterResponse(body([raw(o)])).documents[0]
+	const CFTC = [{ name: 'Commodity Futures Trading Commission', slug: 'commodity-futures-trading-commission' }]
+	const SEC_A = [{ name: 'Securities and Exchange Commission', slug: 'securities-and-exchange-commission' }]
+	const FINCEN = [
+		{ name: 'Treasury Department', slug: 'treasury-department' },
+		{ name: 'Financial Crimes Enforcement Network', slug: 'financial-crimes-enforcement-network' },
+	]
+	const variants = [GENIUS, REG_CRYPTO, UNSAFE_PRACTICES, UNIFIED_AGENDA].flatMap((d) => [
+		d,
+		{ ...d, type: 'Rule', effective_on: '2026-12-01' },
+		{ ...d, type: 'Rule', effective_on: '2026-09-01' },
+		{ ...d, type: 'Rule' },
+		{ ...d, type: 'Correction' },
+		{ ...d, agencies: CFTC },
+		{ ...d, agencies: SEC_A },
+		{ ...d, agencies: FINCEN },
+		{ ...d, agencies: [] },
+		{ ...d, title: `Self-Regulatory Organizations; ${d.title}`, type: 'Notice', agencies: SEC_A },
+		{ ...d, title: `${d.title}; Withdrawal`, type: 'Proposed Rule' },
+		{ ...d, title: 'Sunshine Act Meetings', abstract: 'digital assets' },
+		{ ...d, title: 'Sanctions on a Cryptocurrency Mixer', abstract: '' },
+		{ ...d, title: 'Regulation Crypto Assets', abstract: '' },
+		{ ...d, title: 'Cryptographic Module Validation', abstract: 'post-quantum cryptography' },
+		{ ...d, title: 'Capital Rules', abstract: 'Applies to BITCOIN custody and stablecoin reserves.' },
+	])
+
+	test('agrees with classify on every variant: categories, outcome, and severity', () => {
+		for (const v of variants) {
+			const doc = parse1(v)
+			const e = explain(doc, W_END)
+			const r = classify(parseFederalRegisterResponse(body([raw(v)])), W.start, W.end)
+			if (isOutOfScope(doc)) expect(e.outcome).toBe('out-of-scope')
+			else if (isProcedural(doc)) expect(e.outcome).toBe('procedural')
+			else expect(e.categories).toEqual(categoriesFor(doc))
+			if (e.outcome === 'matched') {
+				expect(r.matched).toBe(1)
+				for (const c of e.categories) expect(r.statuses[idx(c)]).toBe(e.severity!)
+			} else {
+				expect(r.matched).toBe(0)
+				expect(r.statuses).toEqual([Status.OK, Status.OK, Status.OK, Status.OK])
+			}
+			expect(r.informational).toBe(e.outcome === 'informational' ? 1 : 0)
+		}
+	})
+
+	test('live 2026-20888: CFTC, "crypto" in the title, markets only, proposed rule, REVIEW', () => {
+		const e = explain(
+			parse1({
+				document_number: '2026-20888',
+				title: 'Regulation Crypto Asset Transactions and Regulation Crypto Asset Markets',
+				type: 'Proposed Rule',
+				abstract: 'The CFTC is issuing an advanced notice of proposed rulemaking.',
+				agencies: CFTC,
+			}),
+			W_END,
+		)
+		expect(e.outcome).toBe('matched')
+		expect(e.agencies).toEqual([{ slug: 'commodity-futures-trading-commission', watched: true }])
+		expect(e.evidence).toEqual([{ category: 'DIGITAL_ASSET_MARKETS', term: 'crypto', field: 'title' }])
+		expect(e.severity).toBe(Status.REVIEW)
+		expect(e.severityReason).toBe('proposed rule')
+	})
+
+	test('"Regulation Crypto" from the SEC says why it counts', () => {
+		const e = explain(parse1({ title: 'Regulation Crypto Assets', abstract: '', type: 'Proposed Rule', agencies: SEC_A }), W_END)
+		expect(e.evidence.find((x) => x.category === 'TOKENIZED_SECURITIES')).toEqual({
+			category: 'TOKENIZED_SECURITIES',
+			term: 'regulation crypto',
+			field: 'title',
+			note: 'counts only from the SEC',
+		})
+	})
+
+	test('a match in the abstract is attributed to the abstract; an AML agency is evidence', () => {
+		const e = explain(parse1({ title: 'Reporting Requirements', abstract: 'Covers virtual currency.', agencies: FINCEN }), W_END)
+		expect(e.evidence).toEqual([
+			{ category: 'DIGITAL_ASSET_MARKETS', term: 'virtual currency', field: 'abstract' },
+			{
+				category: 'AML_SANCTIONS',
+				term: 'financial-crimes-enforcement-network',
+				field: 'agency',
+				note: 'an AML agency on a digital asset document',
+			},
+		])
+	})
+
+	test('severity reasons cover the effective-date rule', () => {
+		const rule = (effective_on: string | null) => explain(parse1({ ...GENIUS, type: 'Rule', effective_on }), W_END)
+		expect(rule('2026-12-01').severityReason).toBe('final rule, takes effect 2026-12-01')
+		expect(rule('2026-12-01').severity).toBe(Status.REVIEW)
+		expect(rule('2026-09-01').severityReason).toBe('final rule, in effect since 2026-09-01')
+		expect(rule(null).severityReason).toBe('final rule with no effective date, treated as in effect')
+		expect(rule(null).severity).toBe(Status.BLOCK)
+	})
+
+	test('withdrawals and SRO filings explain as informational, with their categories', () => {
+		const e = explain(parse1({ ...GENIUS, title: `${GENIUS.title}; Withdrawal` }), W_END)
+		expect(e.outcome).toBe('informational')
+		expect(e.informational).toBe('withdrawn-proposal')
+		expect(e.categories).toEqual(['STABLECOINS'])
+		expect(e.severity).toBeNull()
 	})
 })
