@@ -97,7 +97,7 @@ writeJson(DEPLOYMENT_FILE, deployment)
 
 // Point the workflow at the real receiver.
 for (const f of ['config.staging.json', 'config.production.json']) {
-	const p = join(ROOT, 'my-workflow', f)
+	const p = join(ROOT, 'reg-gate-workflow', f)
 	const cfg = JSON.parse(readFileSync(p, 'utf-8'))
 	cfg.receiverAddress = gate.address
 	writeJson(p, cfg)
@@ -113,5 +113,5 @@ writeJson(join(ROOT, 'docs', 'deployment.json'), {
 })
 
 console.log(`\nDone. RegGateStatus: ${etherscan('address', gate.address)}`)
-console.log('Updated: my-workflow/config.*.json, docs/deployment.json, deploy/deployments/sepolia.json')
-console.log('\nNext: cre workflow simulate my-workflow --target staging-settings --non-interactive --trigger-index 0 --broadcast')
+console.log('Updated: reg-gate-workflow/config.*.json, docs/deployment.json, deploy/deployments/sepolia.json')
+console.log('\nNext: cre workflow simulate reg-gate-workflow --target staging-settings --non-interactive --trigger-index 0 --broadcast')

@@ -41,7 +41,7 @@ signal a token can act on, and it is built to fail safe: when it does not know, 
 1. **Fetch.** On a cron schedule (or when a reviewer clears a latch, see step 6), every node queries the public Federal Register API for a
    fixed lookback window ending the day before the run, so all nodes see the same finished
    day of publications.
-2. **Classify.** A deterministic rules engine ([`my-workflow/regGate.ts`](my-workflow/regGate.ts))
+2. **Classify.** A deterministic rules engine ([`reg-gate-workflow/regGate.ts`](reg-gate-workflow/regGate.ts))
    sorts documents into `STABLECOINS`, `TOKENIZED_SECURITIES`, `DIGITAL_ASSET_MARKETS`,
    `AML_SANCTIONS`. Only watched regulators count: SEC, CFTC, Treasury, OCC, FDIC, Fed,
    FinCEN, OFAC, CFPB, IRS, and the Executive Office of the President.
@@ -123,7 +123,7 @@ replay and same-chain replay of a failed report.
 ## Layout
 
 ```
-my-workflow/
+reg-gate-workflow/
   regGate.ts            classifier, parser, query builder, report encoder (pure, deterministic)
   workflow.ts           CRE wiring: cron or LatchCleared -> fetch -> consensus -> report -> write
   regGate.test.ts       37 classifier tests
@@ -145,7 +145,7 @@ docs/
 ## Run it
 
 ```bash
-# workflow tests and typecheck (from my-workflow/)
+# workflow tests and typecheck (from reg-gate-workflow/)
 bun install
 bun run typecheck
 bun run test
@@ -155,10 +155,10 @@ forge test
 
 # simulate against the live Federal Register (from the project root)
 # trigger 0 = cron, trigger 1 = LatchCleared
-cre workflow simulate my-workflow --target staging-settings --non-interactive --trigger-index 0
+cre workflow simulate reg-gate-workflow --target staging-settings --non-interactive --trigger-index 0
 
 # replay a real LatchCleared event (needs a clearLatch transaction on Sepolia)
-cre workflow simulate my-workflow --target staging-settings --non-interactive \
+cre workflow simulate reg-gate-workflow --target staging-settings --non-interactive \
   --trigger-index 1 --evm-tx-hash <clearLatch tx hash> --evm-event-index 0
 ```
 
@@ -171,7 +171,7 @@ key is never printed. The scripts refuse any chain other than Sepolia.
 bun install --cwd deploy
 bun deploy/address.ts          # public address to fund from a Sepolia faucet
 bun deploy/deploy.ts           # deploys RegGateStatus + gUSD + gAST, updates configs
-cre workflow simulate my-workflow --target staging-settings --non-interactive --trigger-index 0 --broadcast
+cre workflow simulate reg-gate-workflow --target staging-settings --non-interactive --trigger-index 0 --broadcast
 bun deploy/status.ts           # on-chain status + which tokens can transfer
 ```
 

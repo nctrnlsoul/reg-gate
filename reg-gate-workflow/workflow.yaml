@@ -17,7 +17,7 @@
 # ==========================================================================
 staging-settings:
   user-workflow:
-    workflow-name: "my-workflow-ts-staging"
+    workflow-name: "reg-gate-staging"
   workflow-artifacts:
     workflow-path: "./main.ts"
     config-path: "./config.staging.json"
@@ -27,7 +27,7 @@ staging-settings:
 # ==========================================================================
 production-settings:
   user-workflow:
-    workflow-name: "my-workflow-ts-production"
+    workflow-name: "reg-gate-production"
   workflow-artifacts:
     workflow-path: "./main.ts"
     config-path: "./config.production.json"
