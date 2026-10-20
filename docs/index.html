@@ -4,223 +4,241 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Reg-Gate</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22%3E%3Crect width=%2264%22 height=%2264%22 rx=%2216%22 fill=%22%230055FD%22/%3E%3Crect x=%2213%22 y=%2220%22 width=%229%22 height=%2232%22 rx=%224.5%22 fill=%22%23fff%22/%3E%3Crect x=%2210%22 y=%2248%22 width=%2215%22 height=%225%22 rx=%222.5%22 fill=%22%23fff%22/%3E%3Cg transform=%22rotate(-26 17.5 26)%22%3E%3Crect x=%2215%22 y=%2221%22 width=%2240%22 height=%2210%22 rx=%225%22 fill=%22%23fff%22/%3E%3Crect x=%2228%22 y=%2221%22 width=%225.5%22 height=%2210%22 fill=%22%230055FD%22/%3E%3Crect x=%2241%22 y=%2221%22 width=%225.5%22 height=%2210%22 fill=%22%230055FD%22/%3E%3C/g%3E%3C/svg%3E">
-<meta name="description" content="Live on-chain regulatory status for tokenized assets, written by a Chainlink CRE workflow from U.S. Federal Register publications.">
+<meta name="description" content="Tokenized assets that check the Federal Register before they move. A Chainlink CRE workflow writes a fail-closed regulatory status on-chain.">
+<meta name="color-scheme" content="dark">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self' https: http://127.0.0.1:8545 http://localhost:8545; img-src 'self' data:; base-uri 'none'; form-action 'none'">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="preload" href="fonts/Geist-Variable.woff2" as="font" type="font/woff2" crossorigin>
 <style>
+  @font-face { font-family: "Geist"; src: url("fonts/Geist-Variable.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
+  @font-face { font-family: "Geist Mono"; src: url("fonts/GeistMono-Variable.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
+  @property --beam { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
+
   /* Primitives */
   :root {
-    --p-ink: #161C24; --p-paper: #F3F6F9; --p-white: #FFFFFF; --p-slate: #55606E; --p-mist: #D5DCE4;
-    --p-blue: #0055FD;
-    --p-green: #0B7A4B; --p-amber: #8A5A00; --p-red: #C42B21;
-    --p-green-t: #E3F3EA; --p-amber-t: #FAEFD7; --p-red-t: #FBE6E4; --p-slate-t: #E9EDF2;
+    --p-night: #090B10; --p-night-2: #0E1117; --p-night-3: #131720; --p-line: #1C2230; --p-line-2: #262E3D;
+    --p-bone: #EEF1F6; --p-slate: #8D97A8; --p-dim: #5C6577;
+    --p-blue: #4392E6; --p-blue-hi: #6AA8EE;
+    --p-green: #3ED598; --p-amber: #F2BB4F; --p-red: #FF6B70;
   }
-  /* Semantic tokens, light */
+  /* Semantic */
   :root {
-    --bg: var(--p-paper); --panel: var(--p-white); --ink: var(--p-ink); --muted: var(--p-slate); --line: var(--p-mist);
-    --link: var(--p-blue); --focus: var(--p-blue);
+    --bg: var(--p-night); --surface: var(--p-night-2); --raised: var(--p-night-3); --hair: var(--p-line); --hair-2: var(--p-line-2);
+    --ink: var(--p-bone); --muted: var(--p-slate); --faint: var(--p-dim);
+    --accent: var(--p-blue); --accent-text: var(--p-blue-hi);
     --ok: var(--p-green); --review: var(--p-amber); --block: var(--p-red); --unknown: var(--p-slate);
-    --ok-t: var(--p-green-t); --review-t: var(--p-amber-t); --block-t: var(--p-red-t); --unknown-t: var(--p-slate-t);
-    --mark: var(--p-blue);
-    color-scheme: light;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      --bg: #161C24; --panel: #1C2430; --ink: #E7EDF3; --muted: #9BA7B5; --line: #2E3946;
-      --link: #8AB0FF; --focus: #8AB0FF;
-      --ok: #3ED598; --review: #F2BB4F; --block: #FF6B70; --unknown: #9BA7B5;
-      --ok-t: #14301F; --review-t: #352A10; --block-t: #3B1C1E; --unknown-t: #263040;
-      color-scheme: dark;
-    }
-  }
-  :root[data-theme="dark"] {
-    --bg: #161C24; --panel: #1C2430; --ink: #E7EDF3; --muted: #9BA7B5; --line: #2E3946;
-    --link: #8AB0FF; --focus: #8AB0FF;
-    --ok: #3ED598; --review: #F2BB4F; --block: #FF6B70; --unknown: #9BA7B5;
-    --ok-t: #14301F; --review-t: #352A10; --block-t: #3B1C1E; --unknown-t: #263040;
+    --sans: "Geist", ui-sans-serif, system-ui, "Segoe UI", sans-serif; --mono: "Geist Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+    --ease-out: cubic-bezier(.16, 1, .3, 1);
     color-scheme: dark;
   }
-
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
-  html { -webkit-text-size-adjust: 100%; }
-  body { margin: 0; background: var(--bg); color: var(--ink);
-    font: 16px/1.55 "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif; }
-  a { color: var(--link); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
-  a:hover { text-decoration-thickness: 2px; }
-  a:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
-  .mono { font-family: ui-monospace, "Cascadia Mono", SFMono-Regular, Menlo, Consolas, monospace; font-size: .875em; }
-  .wrap { max-width: 1100px; margin: 0 auto; padding: 32px 16px 56px; }
+  html { background: var(--bg); -webkit-text-size-adjust: 100%; }
+  body { margin: 0; color: var(--ink); font: 15px/1.55 var(--sans); -webkit-font-smoothing: antialiased; }
+  a { color: inherit; text-decoration: none; }
+  a:focus-visible, .btn:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 3px; border-radius: 6px; }
+  .grain { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; opacity: .035; z-index: 50; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 32px; }
+  .mono { font-family: var(--mono); }
 
-  /* Header */
-  header { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
-  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; letter-spacing: -.01em; }
-  .brand svg { width: 26px; height: 26px; flex: none; }
-  .net { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); }
-  .net i { width: 8px; height: 8px; border-radius: 50%; background: var(--unknown); }
-  .net.live i { background: var(--ok); }
+  /* Nav */
+  nav { border-bottom: 1px solid var(--hair); position: relative; z-index: 2; }
+  nav .wrap { display: flex; align-items: center; height: 60px; gap: 32px; }
+  .logo { display: flex; align-items: center; gap: 10px; font-weight: 650; font-size: 15px; letter-spacing: -.01em; }
+  .logo svg { width: 22px; height: 22px; }
+  .links { display: flex; gap: 24px; font-size: 13.5px; color: var(--muted); }
+  .links a { transition: color .15s; }
+  .links a:hover { color: var(--ink); }
+  .live { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); padding: 5px 11px 5px 10px; border: 1px solid var(--hair-2); border-radius: 999px; white-space: nowrap; }
+  .live i { position: relative; width: 6px; height: 6px; border-radius: 50%; background: var(--unknown); }
+  .live.ok i { background: var(--ok); }
+  .live.ok i::after { content: ""; position: absolute; inset: -4px; border-radius: 50%; border: 1px solid var(--ok); opacity: 0; animation: ring 2.6s var(--ease-out) infinite; }
+  .live.bad { color: var(--block); border-color: rgba(255,107,112,.35); }
+  .live.bad i { background: var(--block); }
+  @keyframes ring { 0% { transform: scale(.6); opacity: .7; } 80%, 100% { transform: scale(1.9); opacity: 0; } }
 
-  /* Verdict */
-  .verdict { margin: 48px 0 0; max-width: 32ch; font-size: clamp(28px, 4.2vw, 44px); line-height: 1.12; font-weight: 700; letter-spacing: -.022em; }
-  .context { margin: 14px 0 0; color: var(--muted); max-width: 70ch; }
-  .context b { color: var(--ink); font-weight: 600; }
-  .context a { white-space: nowrap; }
-  .alert { margin: 16px 0 0; display: flex; gap: 10px; align-items: flex-start; color: var(--block); max-width: 70ch; font-weight: 500; }
-  .alert svg { flex: none; margin-top: 3px; }
+  /* Hero */
+  .hero { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.04fr); gap: 56px; align-items: center; padding: 76px 0 64px; }
+  .kicker { font-size: 13.5px; color: var(--muted); margin: 0 0 18px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .kicker b { color: var(--ink); font-weight: 550; }
+  .kicker span { width: 1px; height: 12px; background: var(--hair-2); }
+  h1 { margin: 0; font-size: clamp(34px, 4.4vw, 52px); line-height: 1.04; letter-spacing: -.042em; font-weight: 620; text-wrap: balance; }
+  .lede { margin: 20px 0 0; font-size: 17px; line-height: 1.55; color: var(--muted); max-width: 48ch; }
+  .ctas { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 30px; }
+  .btn { display: inline-flex; align-items: center; height: 40px; padding: 0 16px; border-radius: 8px; font-size: 14px; font-weight: 560; transition: background .15s, border-color .15s; }
+  .btn.primary { background: var(--accent); color: var(--p-night); }
+  .btn.primary:hover { background: var(--accent-text); }
+  .btn.ghost { border: 1px solid var(--hair-2); }
+  .btn.ghost:hover { border-color: var(--muted); }
 
-  /* The gate board: the signature element */
-  .board { margin-top: 36px; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
-  .head, .lane { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.6fr) 150px minmax(0, 1.05fr); align-items: center; }
-  .head { padding: 12px 24px; border-bottom: 1px solid var(--line); font-size: 13px; color: var(--muted); }
-  .head span:nth-child(3) { text-align: center; }
-  .lane { padding: 22px 24px; border-top: 1px solid var(--line); min-height: 112px; }
-  .lane:first-of-type { border-top: 0; }
-  .cat h3 { margin: 0; font-size: 17px; font-weight: 650; letter-spacing: -.005em; }
-  .cat p { margin: 4px 0 0; font-size: 13.5px; color: var(--muted); line-height: 1.45; max-width: 32ch; }
-  .doc { padding-right: 24px; min-width: 0; }
-  .doc-title { margin: 0; font-size: 14.5px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  .doc-title.quiet { color: var(--muted); }
-  .doc-src { margin: 4px 0 0; font-size: 13px; color: var(--muted); }
-  .doc-src a { font-weight: 600; }
-  .flag { display: inline-block; margin-top: 8px; font-size: 12.5px; font-weight: 600; color: var(--block); }
+  /* The contract read: signature element */
+  .read { position: relative; background: linear-gradient(180deg, #10141C, var(--surface)); border: 1px solid var(--hair-2); border-radius: 14px; overflow: hidden;
+    box-shadow: 0 30px 80px -30px rgba(67,146,230,.22); }
+  .read::before { content: ""; position: absolute; right: -120px; top: -140px; width: 340px; height: 340px; background: radial-gradient(closest-side, rgba(67,146,230,.2), transparent); pointer-events: none; }
+  .read::after { content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 1px; pointer-events: none; opacity: 0; transition: opacity .8s ease;
+    background: conic-gradient(from var(--beam), transparent 0 72%, rgba(106,168,238,.95) 86%, transparent 94%);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; }
+  .read.scanning::after { opacity: 1; animation: beam 1.9s linear infinite; }
+  @keyframes beam { to { --beam: 360deg; } }
+  .read-top { display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 18px; border-bottom: 1px solid var(--hair); font-size: 12.5px; color: var(--muted); font-family: var(--mono); }
+  .read-top b { color: var(--ink); font-weight: 550; }
+  .read-top .net { margin-left: auto; font-size: 11.5px; }
+  .calls { padding: 6px 0; font-family: var(--mono); font-size: 12.5px; }
+  .call { display: grid; grid-template-columns: minmax(0, 1fr) 96px 92px; gap: 12px; align-items: center; padding: 9px 18px; position: relative; }
+  .call + .call { border-top: 1px solid rgba(28,34,48,.75); }
+  .call.flash { animation: flash 1.2s ease; }
+  @keyframes flash { 0% { background: rgba(106,168,238,.10); } 100% { background: transparent; } }
+  .fn { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fn em { font-style: normal; color: var(--ink); }
+  .val { font-weight: 600; letter-spacing: .02em; display: inline-flex; align-items: center; gap: 7px; color: var(--tone, var(--unknown)); transition: opacity .35s ease, transform .5s var(--ease-out); }
+  .val::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .val.pending { color: transparent; width: 64px; height: 12px; border-radius: 3px; background: linear-gradient(90deg, var(--raised), #1F2533, var(--raised)); background-size: 200% 100%; animation: shimmer 1.1s linear infinite; }
+  .val.pending::before { display: none; }
+  .val.arrive { opacity: 0; transform: translateY(4px); }
+  @keyframes shimmer { to { background-position: -200% 0; } }
+  .doc { color: var(--faint); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .t-OK { --tone: var(--ok); } .t-REVIEW { --tone: var(--review); } .t-BLOCK { --tone: var(--block); } .t-UNKNOWN { --tone: var(--unknown); }
+  .tx { margin: 0 18px 8px; padding: 11px 14px; border-radius: 8px; font-family: var(--mono); font-size: 12px; border: 1px solid var(--hair-2); color: var(--muted);
+    opacity: 0; transform: translateY(6px); transition: opacity .45s ease, transform .6s var(--ease-out); }
+  .tx.show { opacity: 1; transform: none; }
+  .tx b { font-weight: 550; color: var(--ink); }
+  .tx.rev { border-color: rgba(255,107,112,.3); background: rgba(255,107,112,.06); color: #FFB3B5; }
+  .tx.rev b { color: #FFD1D2; }
+  .tx.rev.show { animation: hit .9s ease .1s 1; }
+  @keyframes hit { 0% { box-shadow: 0 0 0 0 rgba(255,107,112,.45); } 100% { box-shadow: 0 0 0 10px rgba(255,107,112,0); } }
+  .tx.okay { border-color: rgba(62,213,152,.25); background: rgba(62,213,152,.05); color: #A9EBCF; }
+  .tx.okay b { color: #D2F6E6; }
+  .tx span { color: var(--muted); }
+  .read-foot { display: flex; justify-content: space-between; gap: 12px; padding: 8px 18px 16px; font-size: 12px; color: var(--faint); font-family: var(--mono); }
 
-  /* Status on the wire */
-  .wire { position: relative; display: flex; justify-content: center; align-items: center; align-self: stretch; }
-  .wire::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; border-top: 2px solid var(--wire, var(--line)); }
-  .wire.dashed::before { border-top-style: dashed; }
-  .wire.end::before { right: 50%; }
-  .pill { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px 5px 9px; border-radius: 999px;
-    font-size: 13px; font-weight: 700; letter-spacing: .02em; background: var(--tint); color: var(--tone); box-shadow: 0 0 0 4px var(--panel); }
-  .pill svg { width: 14px; height: 14px; }
-  .s-OK { --tone: var(--ok); --tint: var(--ok-t); --wire: var(--ok); }
-  .s-REVIEW { --tone: var(--review); --tint: var(--review-t); --wire: var(--review); }
-  .s-BLOCK { --tone: var(--block); --tint: var(--block-t); --wire: var(--block); }
-  .s-UNKNOWN { --tone: var(--unknown); --tint: var(--unknown-t); --wire: var(--line); }
-  .s-REPORT { --tone: var(--link); }
+  /* Metrics */
+  .metrics { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--hair); border-bottom: 1px solid var(--hair); }
+  .metric { padding: 30px 28px 28px; }
+  .metric + .metric { border-left: 1px solid var(--hair); }
+  .num { font-size: 44px; line-height: 1; letter-spacing: -.045em; font-weight: 560; font-variant-numeric: tabular-nums; }
+  .num small { font-size: 22px; color: var(--muted); letter-spacing: -.02em; margin-left: 4px; font-weight: 500; }
+  .mlabel { margin-top: 10px; font-size: 13.5px; color: var(--muted); }
 
-  /* Gate */
-  .gatecell { display: flex; align-items: center; gap: 14px; padding-left: 24px; position: relative; min-width: 0; }
-  .gatecell.wired::before { content: ""; position: absolute; left: 0; width: 24px; top: 50%; border-top: 2px solid var(--wire, var(--line)); }
-  .gatecell.wired.dashed::before { border-top-style: dashed; }
-  .gate { width: 58px; height: 40px; flex: none; color: var(--tone); overflow: visible; }
-  .gate .bar { transform-box: view-box; transform-origin: 9px 17px; transition: transform .7s cubic-bezier(.2,.8,.2,1); }
-  .gate.open .bar { transform: rotate(-52deg); }
-  .tok { min-width: 0; }
-  .tok-line { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
-  .tok-name { font-weight: 700; font-size: 16px; }
-  .tok-state { font-weight: 700; font-size: 14px; color: var(--tone); }
-  .tok-why { margin: 2px 0 0; font-size: 13px; color: var(--muted); line-height: 1.45; }
-  .tok-addr { font-size: 12.5px; }
-  .none { font-size: 13px; color: var(--muted); }
+  /* Status board */
+  .section { padding: 72px 0 0; scroll-margin-top: 24px; }
+  .sh { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; margin-bottom: 18px; flex-wrap: wrap; }
+  .sh h2 { margin: 0; font-size: 22px; letter-spacing: -.025em; font-weight: 600; }
+  .sh p { margin: 0; font-size: 12.5px; color: var(--muted); font-family: var(--mono); }
+  .alert { display: flex; gap: 12px; align-items: flex-start; margin: 0 0 16px; padding: 14px 16px; border-radius: 10px; border: 1px solid rgba(255,107,112,.3); background: rgba(255,107,112,.06); color: #FFC2C4; font-size: 14px; }
+  .alert b { color: #FFD9DA; font-weight: 600; }
+  .board { border: 1px solid var(--hair-2); border-radius: 14px; overflow: hidden; background: var(--surface); }
+  .lane { display: grid; grid-template-columns: 210px minmax(0, 1fr) 130px 220px; gap: 28px; align-items: center; padding: 22px 24px; }
+  .lane + .lane { border-top: 1px solid var(--hair); }
+  .cat { font-weight: 600; font-size: 15.5px; letter-spacing: -.01em; }
+  .cat-sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  .title { margin: 0; font-size: 14.5px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .title.quiet { color: var(--muted); }
+  .src { margin-top: 5px; font-size: 12.5px; color: var(--muted); }
+  .src a { color: var(--accent-text); font-family: var(--mono); font-size: 12px; }
+  .src a:hover { text-decoration: underline; text-underline-offset: 3px; }
+  .flag { display: inline-block; margin-top: 7px; font-size: 12px; font-weight: 550; color: var(--block); }
+  .chip { justify-self: start; display: inline-flex; align-items: center; gap: 7px; height: 26px; padding: 0 10px; border-radius: 6px; font-size: 12px; font-weight: 600; letter-spacing: .04em; color: var(--tone); border: 1px solid color-mix(in srgb, var(--tone) 38%, transparent); }
+  .chip::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .tok { display: flex; align-items: center; gap: 14px; min-width: 0; }
+  .tok svg { width: 48px; height: 34px; flex: none; overflow: visible; color: var(--tone); }
+  .tok .bar { transform-box: view-box; transform-origin: 5px 12px; transition: transform 1s var(--ease-out); }
+  .tok.open .bar { transform: rotate(-56deg); }
+  .tok.open.pre .bar { transform: rotate(0deg); }
+  .tok.shut.pre .bar { transform: rotate(-56deg); }
+  .tok b { font-size: 14.5px; font-weight: 600; display: block; color: var(--ink); }
+  .tok .st { font-size: 12.5px; font-weight: 560; color: var(--tone); }
+  .tok .why { display: block; font-size: 12px; color: var(--muted); margin-top: 1px; }
+  .none-tok { font-size: 12.5px; color: var(--faint); }
 
-  /* Lower sections */
-  .lower { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 48px; margin-top: 56px; }
-  h2 { font-size: 20px; letter-spacing: -.01em; margin: 0 0 6px; }
-  .sub { margin: 0 0 18px; color: var(--muted); font-size: 14.5px; max-width: 60ch; }
-  ol.events { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
-  ol.events li { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 4px 16px; padding: 14px 0; border-bottom: 1px solid var(--line); font-size: 14.5px; }
-  .ev-time { color: var(--muted); font-size: 13.5px; }
-  .ev-what { font-weight: 650; display: inline-flex; align-items: center; gap: 7px; }
-  .ev-what svg { width: 14px; height: 14px; color: var(--tone); flex: none; }
-  .ev-detail { grid-column: 2; color: var(--muted); font-size: 13.5px; overflow-wrap: anywhere; }
-  table.map { width: 100%; border-collapse: collapse; font-size: 14.5px; }
-  table.map th { text-align: left; font-weight: 600; font-size: 13px; color: var(--muted); padding: 0 0 8px; border-bottom: 1px solid var(--line); }
-  table.map td { padding: 10px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
-  table.map td:last-child { text-align: right; white-space: nowrap; }
-  table.map .pill { box-shadow: none; }
-  ul.rules { margin: 20px 0 0; padding: 0; list-style: none; font-size: 14.5px; }
-  ul.rules li { padding: 8px 0 8px 18px; position: relative; color: var(--muted); }
-  ul.rules li::before { content: ""; position: absolute; left: 0; top: 17px; width: 7px; height: 2px; background: var(--muted); }
-  ul.rules b { color: var(--ink); font-weight: 600; }
+  /* Events */
+  .events { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--hair); }
+  .events li { display: grid; grid-template-columns: 140px 200px minmax(0, 1fr) 120px; gap: 20px; padding: 15px 4px; border-bottom: 1px solid var(--hair); font-size: 13.5px; align-items: baseline; }
+  .events .t { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+  .events .w { font-weight: 560; color: var(--tone, var(--ink)); }
+  .events .d { color: var(--muted); overflow-wrap: anywhere; }
+  .events .x { text-align: right; font-family: var(--mono); font-size: 12px; color: var(--accent-text); }
+  .events .x:hover { text-decoration: underline; text-underline-offset: 3px; }
 
-  ol.steps { list-style: none; margin: 20px 0 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 24px; counter-reset: s; }
-  ol.steps li { counter-increment: s; border-top: 2px solid var(--ink); padding-top: 14px; }
-  ol.steps li::before { content: counter(s); display: block; font-weight: 700; font-size: 14px; color: var(--muted); margin-bottom: 4px; }
-  ol.steps h3 { margin: 0 0 6px; font-size: 16px; }
-  ol.steps p { margin: 0; color: var(--muted); font-size: 14px; }
-  .runs { margin-top: 56px; }
+  footer { margin-top: 80px; border-top: 1px solid var(--hair); }
+  footer .wrap { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding-top: 22px; padding-bottom: 40px; font-size: 13px; color: var(--faint); }
+  footer a:hover { color: var(--muted); }
 
-  footer { margin-top: 56px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13.5px; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-
-  @media (max-width: 860px) {
-    .head { display: none; }
-    .lane { grid-template-columns: 1fr auto; grid-template-areas: "cat wire" "doc doc" "gate gate"; gap: 14px 16px; padding: 20px; }
-    .cat { grid-area: cat; } .doc { grid-area: doc; padding-right: 0; } .wire { grid-area: wire; align-self: start; }
-    .wire::before { display: none; }
-    .gatecell { grid-area: gate; padding: 12px 0 0; border-top: 1px dashed var(--line); }
-    .gatecell.wired::before { display: none; }
-    .lower { grid-template-columns: 1fr; gap: 40px; }
-    ol.steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  @media (max-width: 980px) {
+    .hero { grid-template-columns: 1fr; gap: 40px; padding: 52px 0 48px; }
+    .lane { grid-template-columns: 1fr auto; grid-template-areas: "cat chip" "doc doc" "tok tok"; gap: 14px 16px; padding: 20px; }
+    .lane > :nth-child(1) { grid-area: cat; } .lane > :nth-child(2) { grid-area: doc; } .lane > :nth-child(3) { grid-area: chip; align-self: start; } .lane > :nth-child(4) { grid-area: tok; padding-top: 14px; border-top: 1px dashed var(--hair-2); }
+    .events li { grid-template-columns: 120px minmax(0, 1fr); }
+    .events .d, .events .x { grid-column: 2; text-align: left; }
   }
-  @media (max-width: 520px) {
-    .verdict { margin-top: 32px; }
-    ol.steps { grid-template-columns: 1fr; }
-    ol.events li { grid-template-columns: 1fr; }
-    .ev-detail { grid-column: 1; }
+  @media (max-width: 720px) {
+    .wrap { padding: 0 16px; }
+    nav .wrap { gap: 16px; }
+    .links { display: none; }
+    .metrics { grid-template-columns: 1fr 1fr; }
+    .metric:nth-child(3) { border-left: 0; }
+    .metric:nth-child(n+3) { border-top: 1px solid var(--hair); }
+    .metric { padding: 24px 18px; }
+    .num { font-size: 36px; }
+    .call { grid-template-columns: minmax(0, 1fr) 88px; }
+    .doc { display: none; }
+    .events li { grid-template-columns: 1fr; gap: 2px; }
+    .events .d, .events .x { grid-column: 1; }
   }
   @media (prefers-reduced-motion: reduce) {
-    .gate .bar { transition: opacity .3s ease; }
+    .read.scanning::after { animation: none; opacity: 0; }
+    .live.ok i::after { animation: none; }
+    .val, .tx, .tok .bar { transition: opacity .3s ease; transform: none !important; }
+    .val.pending { animation: none; }
+    .tx.rev.show, .call.flash { animation: none; }
   }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <header>
-    <div class="brand">
-      <svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="var(--mark)"/><rect x="13" y="20" width="9" height="32" rx="4.5" fill="#fff"/><rect x="10" y="48" width="15" height="5" rx="2.5" fill="#fff"/><g transform="rotate(-26 17.5 26)"><rect x="15" y="21" width="40" height="10" rx="5" fill="#fff"/><rect x="28" y="21" width="5.5" height="10" fill="var(--mark)"/><rect x="41" y="21" width="5.5" height="10" fill="var(--mark)"/></g></svg>
-      Reg-Gate
-    </div>
-    <span class="net" id="net"><i></i><span id="nettext">Connecting to Sepolia</span></span>
-  </header>
+<svg class="grain" aria-hidden="true"><filter id="grain"><feTurbulence type="fractalNoise" baseFrequency=".9" numOctaves="3" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#grain)"/></svg>
 
-  <main>
-    <h1 class="verdict" id="verdict">Reading the contract on Sepolia.</h1>
-    <p class="context" id="context">A Chainlink CRE workflow reads U.S. Federal Register publications, writes a status for each asset category to a contract, and tokens check it before every transfer.</p>
-    <p class="alert" id="alert" hidden></p>
+<nav><div class="wrap">
+  <a class="logo" href="#top"><svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="#4392E6"/><rect x="13" y="20" width="9" height="32" rx="4.5" fill="#fff"/><rect x="10" y="48" width="15" height="5" rx="2.5" fill="#fff"/><g transform="rotate(-26 17.5 26)"><rect x="15" y="21" width="40" height="10" rx="5" fill="#fff"/><rect x="28" y="21" width="5.5" height="10" fill="#4392E6"/><rect x="41" y="21" width="5.5" height="10" fill="#4392E6"/></g></svg>Reg-Gate</a>
+  <div class="links"><a href="#status">Status</a><a id="nav-contract" href="#" target="_blank" rel="noopener noreferrer">Contract</a><a href="https://github.com/nctrnlsoul/reg-gate" target="_blank" rel="noopener noreferrer">Source</a></div>
+  <span class="live" id="live"><i></i><span id="livetext">Connecting</span></span>
+</div></nav>
 
-    <section class="board" aria-label="Status by category">
-      <div class="head" aria-hidden="true"><span>Category</span><span>Document behind the status</span><span>Status</span><span>Demo token gate</span></div>
-      <div id="lanes"></div>
-    </section>
-
-    <div class="lower">
-      <section aria-labelledby="ev-h">
-        <h2 id="ev-h">Contract events</h2>
-        <p class="sub">Every accepted report, latch and reviewer clear is an event on the contract, so this list is a public audit trail. A report the contract rejects reverts and leaves no event.</p>
-        <ol class="events" id="events"><li><span class="ev-time">Loading</span><span>Reading contract events</span></li></ol>
-      </section>
-      <section aria-labelledby="dec-h">
-        <h2 id="dec-h">How a status is decided</h2>
-        <p class="sub">Only watched regulators count: SEC, CFTC, Treasury, OCC, FDIC, the Fed, FinCEN, OFAC, CFPB, IRS and the White House.</p>
-        <table class="map">
-          <thead><tr><th scope="col">Matching document type</th><th scope="col">Status</th></tr></thead>
-          <tbody id="maprows"></tbody>
-        </table>
-        <ul class="rules">
-          <li><b>Silence blocks.</b> No report, or one older than the freshness limit, reads BLOCK everywhere.</li>
-          <li><b>A BLOCK latches</b> until a human reviewer clears it, and a cleared document still reads REVIEW, never OK.</li>
-          <li><b>Only Chainlink's forwarder can write,</b> for this chain, with a strictly newer timestamp each time.</li>
-          <li><b>This page fails closed too.</b> If it cannot read the chain it shows UNKNOWN, never OK.</li>
-        </ul>
-      </section>
+<main class="wrap" id="top">
+  <section class="hero">
+    <div>
+      <p class="kicker"><b>Chainlink CRE</b><span></span>Federal Register<span></span>Ethereum Sepolia</p>
+      <h1>Tokenized assets that check the Federal Register before they move.</h1>
+      <p class="lede">New U.S. federal rules are classified into four asset categories and written on-chain as a fail-closed status. Token transfers read it first.</p>
+      <div class="ctas"><a class="btn primary" id="cta-contract" href="#" target="_blank" rel="noopener noreferrer">View contract</a><a class="btn ghost" href="https://github.com/nctrnlsoul/reg-gate" target="_blank" rel="noopener noreferrer">Source on GitHub</a></div>
     </div>
 
-    <section class="runs" aria-labelledby="run-h">
-      <h2 id="run-h">How it runs</h2>
-      <ol class="steps">
-        <li><h3>Fetch</h3><p>Every node in the Chainlink DON pulls the same finished window of Federal Register publications.</p></li>
-        <li><h3>Classify and agree</h3><p>A deterministic rules engine sorts them into four categories. Nodes must agree byte for byte. No LLM decides.</p></li>
-        <li><h3>Write and enforce</h3><p>The signed result lands in the RegGateStatus contract. Tokens ask it before each transfer.</p></li>
-        <li><h3>Re-check on override</h3><p>When a reviewer clears a BLOCK, that event triggers the workflow again within minutes.</p></li>
-      </ol>
-    </section>
-  </main>
+    <div class="read" id="read" aria-label="Live read of the RegGateStatus contract" aria-live="polite">
+      <div class="read-top"><b>RegGateStatus</b><span id="read-addr">reading</span><span class="net" id="read-net">eth_call, Sepolia</span></div>
+      <div class="calls" id="calls"></div>
+      <div id="txs"></div>
+      <div class="read-foot"><span id="read-last">last report</span><span id="read-until"></span></div>
+    </div>
+  </section>
 
-  <footer>
-    <span>Flags regulatory publications for human review. Not legal advice. Built by NorthSchema.</span>
-    <a href="https://github.com/nctrnlsoul/reg-gate" target="_blank" rel="noopener noreferrer">Source on GitHub</a>
-  </footer>
-</div>
+  <section class="metrics" aria-label="Key numbers">
+    <div class="metric"><div class="num"><span id="m1">…</span><small id="m1s">/ 4</small></div><div class="mlabel">Categories not clear</div></div>
+    <div class="metric"><div class="num"><span id="m2">…</span><small id="m2s">/ 2</small></div><div class="mlabel">Demo tokens blocked</div></div>
+    <div class="metric"><div class="num"><span id="m3">…</span><small id="m3s">days</small></div><div class="mlabel">Until silence reads BLOCK</div></div>
+    <div class="metric"><div class="num"><span id="m4">91</span></div><div class="mlabel">Tests, every planted bug caught</div></div>
+  </section>
+
+  <section class="section" id="status">
+    <div class="sh"><h2>Status by category</h2><p id="window">reading the contract</p></div>
+    <div class="alert" id="alert" hidden></div>
+    <div class="board" id="board"></div>
+  </section>
+
+  <section class="section">
+    <div class="sh"><h2>Contract events</h2><p>RegGateStatus and the Chainlink forwarder</p></div>
+    <ol class="events" id="events"><li><span class="t">loading</span><span class="w">Reading events</span></li></ol>
+  </section>
+</main>
+
+<footer><div class="wrap"><span>Flags federal publications for human review. Not legal advice. Built by NorthSchema.</span><a href="https://github.com/nctrnlsoul/reg-gate" target="_blank" rel="noopener noreferrer">MIT licensed source</a></div></footer>
 
 <script>
 (() => {
@@ -228,10 +246,10 @@
   const SEPOLIA_HEX = '0xaa36a7';
   const DEFAULT_RPCS = ['https://ethereum-sepolia-rpc.publicnode.com', 'https://sepolia.drpc.org'];
   const CATS = [
-    ['STABLECOINS', 'Stablecoins', 'Stablecoin issuance and reserves, including the GENIUS Act.'],
-    ['TOKENIZED_SECURITIES', 'Tokenized securities', 'Tokenized funds and crypto assets under SEC securities rules.'],
-    ['DIGITAL_ASSET_MARKETS', 'Digital asset markets', 'Crypto trading, custody, market structure and listings.'],
-    ['AML_SANCTIONS', 'AML and sanctions', 'Money laundering, sanctions and mixers, where digital assets are involved.'],
+    ['STABLECOINS', 'Stablecoins', 'Issuance and reserves'],
+    ['TOKENIZED_SECURITIES', 'Tokenized securities', 'SEC securities rules'],
+    ['DIGITAL_ASSET_MARKETS', 'Digital asset markets', 'Trading, custody, listings'],
+    ['AML_SANCTIONS', 'AML and sanctions', 'Where digital assets are involved'],
   ];
   const STATUS = ['OK', 'REVIEW', 'BLOCK'];
   const ADDR = /^0x[0-9a-fA-F]{40}$/;
@@ -248,43 +266,22 @@
   const T_STATUS = '0x7bb7e136e435ccb26bf677f3fce3572a4c8b33fad6b75908d576edff5ac77af8';
   const T_LATCHED = '0x45ca50b55474b3b1c5577ef29d3ec7bcb578f4353ccb6d3f10e3d0715a649963';
   const T_CLEARED = '0x1dd0de6cc67078b1932e1c8f833fd76ba4ce87e9b5619f33180bef3397f0f0f0';
+  // KeystoneForwarder ReportProcessed(address indexed receiver, bytes32 indexed executionId, bytes2 indexed reportId, bool result)
+  const T_PROCESSED = '0x3617b009e9785c42daebadb6d3fb553243a4bf586d07ea72d65d80013ce116b5';
   const LOG_CHUNK = 9000;     // stays under free-tier RPC range limits
   const LOG_MAX_CHUNKS = 12;  // about two weeks of Sepolia blocks
-  const SVGNS = 'http://www.w3.org/2000/svg';
+  const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   const $ = (id) => document.getElementById(id);
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
   const ext = (href, text, cls) => { const a = el('a', cls || null, text); a.href = href; a.target = '_blank'; a.rel = 'noopener noreferrer'; return a; };
   const shortAddr = (a) => a.slice(0, 6) + '…' + a.slice(-4);
-  function svg(paths, view, cls) {
-    const s = document.createElementNS(SVGNS, 'svg');
-    s.setAttribute('viewBox', view || '0 0 16 16'); s.setAttribute('aria-hidden', 'true'); if (cls) s.setAttribute('class', cls);
-    for (const [tag, attrs] of paths) {
-      const p = document.createElementNS(SVGNS, tag);
-      for (const k in attrs) p.setAttribute(k, attrs[k]);
-      s.append(p);
-    }
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const SVGNS = 'http://www.w3.org/2000/svg';
+  function svg(view, parts) {
+    const s = document.createElementNS(SVGNS, 'svg'); s.setAttribute('viewBox', view); s.setAttribute('aria-hidden', 'true');
+    for (const [tag, attrs] of parts) { const p = document.createElementNS(SVGNS, tag); for (const k in attrs) p.setAttribute(k, attrs[k]); s.append(p); }
     return s;
-  }
-  const stroke = { fill: 'none', stroke: 'currentColor', 'stroke-width': '2', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' };
-  const ICON = {
-    OK: () => svg([['path', { d: 'M3.5 8.5l3 3 6-7', ...stroke }]]),
-    REVIEW: () => svg([['path', { d: 'M8 3.5v5.5', ...stroke }], ['circle', { cx: '8', cy: '12.3', r: '1.1', fill: 'currentColor' }]]),
-    BLOCK: () => svg([['path', { d: 'M4.5 4.5l7 7M11.5 4.5l-7 7', ...stroke }]]),
-    REPORT: () => svg([['circle', { cx: '8', cy: '8', r: '4', fill: 'currentColor' }]]),
-    UNKNOWN: () => svg([['path', { d: 'M6 6.2a2 2 0 1 1 2.8 1.8c-.6.3-.8.7-.8 1.3v.4', ...stroke }], ['circle', { cx: '8', cy: '12.4', r: '1.1', fill: 'currentColor' }]]),
-  };
-  function pill(status) {
-    const p = el('span', 'pill s-' + status);
-    p.append(ICON[status](), status);
-    return p;
-  }
-  function gateIcon(open) {
-    return svg([
-      ['rect', { x: '4', y: '10', width: '6', height: '28', rx: '2', fill: 'currentColor' }],
-      ['rect', { x: '48', y: '10', width: '6', height: '28', rx: '2', fill: 'currentColor', opacity: '.45' }],
-      ['rect', { class: 'bar', x: '7', y: '14.5', width: '46', height: '5', rx: '2.5', fill: 'currentColor' }],
-    ], '0 0 58 40', 'gate' + (open ? ' open' : ''));
   }
 
   // Optional ?rpc= override for local testing. Only https or localhost.
@@ -310,66 +307,28 @@
   }
   const call = (to, data) => rpc('eth_call', [{ to, data }, 'latest']);
   const arg8 = (n) => n.toString(16).padStart(64, '0');
-  const word = (hex, i) => {
-    const w = hex.slice(2 + 64 * i, 2 + 64 * (i + 1));
-    if (w.length !== 64) throw new Error('short return data');
-    return w;
-  };
+  const word = (hex, i) => { const w = hex.slice(2 + 64 * i, 2 + 64 * (i + 1)); if (w.length !== 64) throw new Error('short return data'); return w; };
   const uint = (w) => BigInt('0x' + w);
-  const b32str = (w) => {
-    let s = '';
-    for (let i = 0; i < 64; i += 2) { const c = parseInt(w.slice(i, i + 2), 16); if (c === 0) break; s += String.fromCharCode(c); }
-    return s;
-  };
+  const b32str = (w) => { let s = ''; for (let i = 0; i < 64; i += 2) { const c = parseInt(w.slice(i, i + 2), 16); if (c === 0) break; s += String.fromCharCode(c); } return s; };
   const SEL = { lastAsOf: '0xa89210cb', maxAge: '0x687043c5', statusOf: '0x6392d5aa', reportedStatus: '0x86106ee6',
     latchInfo: '0xa31cbc7b', transfersAllowed: '0xb0660c3d' };
 
   let chainNow = Math.floor(Date.now() / 1000);
-  function ago(sec) {
-    const d = Math.max(0, chainNow - sec);
-    if (d < 90) return 'just now';
-    if (d < 5400) return Math.round(d / 60) + ' minutes ago';
-    if (d < 172800) return Math.round(d / 3600) + ' hours ago';
-    return Math.round(d / 86400) + ' days ago';
-  }
-  const fmt = (sec) => new Date(sec * 1000).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  const fmt = (sec) => new Date(sec * 1000).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+  const fmtDay = (sec) => new Date(sec * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 
-  function setNet(ok, text) { $('net').className = 'net' + (ok ? ' live' : ''); $('nettext').textContent = text; }
-  function setAlert(text) {
-    const a = $('alert');
-    a.hidden = !text; a.replaceChildren();
-    if (text) { const i = ICON.BLOCK(); i.setAttribute('width', '16'); i.setAttribute('height', '16'); a.append(i, el('span', null, text)); }
-  }
-  function setContext(parts) {
-    const c = $('context'); c.replaceChildren();
-    for (const p of parts) c.append(p);
-  }
-
-  // Severity table, drawn with the same pills as the board.
-  (function renderMap() {
-    const rows = [['Final rule or presidential document', 'BLOCK'], ['Proposed rule or notice', 'REVIEW'], ['Any other type', 'BLOCK'], ['Nothing matched in the window', 'OK']];
-    const body = $('maprows');
-    for (const [label, st] of rows) {
-      const tr = el('tr'); tr.append(el('td', null, label));
-      const td = el('td'); td.append(pill(st)); tr.append(td); body.append(tr);
-    }
-  })();
-
-  // Federal Register titles: display only. Statuses come from the contract, never from here.
-  const titles = new Map(); // docNumber -> { title, type, agency } | 'pending' | 'failed'
+  // ---------- Federal Register titles: display only, never a status source
+  const titles = new Map();
   async function loadTitles(docs) {
     const want = [...new Set(docs)].filter((d) => DOCNUM.test(d) && !titles.has(d));
     if (!want.length) return false;
     want.forEach((d) => titles.set(d, 'pending'));
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 8000);
+    const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 8000);
     try {
-      const url = FR_API + want.join(',') + '.json?fields%5B%5D=document_number&fields%5B%5D=title&fields%5B%5D=type&fields%5B%5D=agencies';
-      const r = await fetch(url, { signal: ctrl.signal });
+      const r = await fetch(FR_API + want.join(',') + '.json?fields%5B%5D=document_number&fields%5B%5D=title&fields%5B%5D=type&fields%5B%5D=agencies', { signal: ctrl.signal });
       if (!r.ok) throw new Error('status ' + r.status);
       const j = await r.json();
-      const list = Array.isArray(j.results) ? j.results : [j];
-      for (const d of list) {
+      for (const d of (Array.isArray(j.results) ? j.results : [j])) {
         if (!d || !want.includes(d.document_number) || typeof d.title !== 'string' || typeof d.type !== 'string') continue;
         // Prefer the most specific watched agency (FR lists parents first, e.g. Treasury before FinCEN).
         const ag = Array.isArray(d.agencies) ? d.agencies.slice().reverse().find((a) => a && AGENCY_SHORT[a.slug]) || d.agencies[0] : null;
@@ -381,130 +340,231 @@
     return true;
   }
 
-  function docCell(r) {
-    const c = el('div', 'doc');
-    if (!r) { c.append(el('p', 'doc-title quiet', 'Not readable right now.')); return c; }
-    if (!r.doc) {
-      c.append(el('p', 'doc-title quiet', r.reported === 'OK' ? 'No matching publication in the review window.' : 'No document recorded.'));
-    } else if (!DOCNUM.test(r.doc)) {
-      c.append(el('p', 'doc-title mono', r.doc));
-    } else {
-      const info = titles.get(r.doc);
-      const known = info && typeof info === 'object';
-      c.append(el('p', 'doc-title' + (known ? '' : ' quiet'), known ? info.title : info === 'pending' ? 'Loading the document title.' : 'Federal Register document (title unavailable right now)'));
-      const src = el('p', 'doc-src');
-      const what = known ? [info.agency, info.type.toLowerCase()].filter(Boolean).join(', ') : '';
-      if (what) src.append(what + ', ');
-      src.append(ext('https://www.federalregister.gov/d/' + r.doc, r.doc));
-      if (!r.fresh) src.append(' (from the last report)');
-      c.append(src);
-    }
-    if (r.latched) c.append(el('span', 'flag', 'Latched. Waiting for a reviewer to clear it.'));
-    else if (!r.fresh && r.last) c.append(el('span', 'flag', 'Reads BLOCK because the report is stale.'));
-    return c;
-  }
-
-  function gateCell(row, tokens, status, dashed) {
-    const c = el('div', 'gatecell');
-    if (!tokens.length) { c.append(el('span', 'none', 'No demo token on this lane')); return c; }
-    c.classList.add('wired', 's-' + status); if (dashed) c.classList.add('dashed');
-    for (const t of tokens) {
-      const a = t.allowed;
-      const tone = a === true ? 'OK' : a === false ? 'BLOCK' : 'UNKNOWN';
-      const box = el('div', 'tok s-' + tone);
-      const g = gateIcon(a === true); g.classList.add('s-' + tone);
-      const line = el('div', 'tok-line');
-      line.append(el('span', 'tok-name', t.symbol), el('span', 'tok-state', a === true ? 'Open' : a === false ? 'Blocked' : 'Unknown'));
-      let why;
-      if (a === null || a === undefined || !row) why = 'Could not read it, so treat it as blocked.';
-      else if (a) why = t.strict ? 'Strict token, and the category is OK.' : 'Lenient token. It only stops on BLOCK.';
-      else why = t.strict && status !== 'BLOCK' ? 'Strict token. It only moves on OK.' : 'The category is BLOCK.';
-      box.append(line, el('p', 'tok-why', why));
-      if (ADDR.test(t.address)) { const p = el('p', 'tok-why'); p.append(ext('https://sepolia.etherscan.io/address/' + t.address, shortAddr(t.address), 'mono tok-addr')); box.append(p); }
-      c.append(g, box);
-    }
-    return c;
-  }
-
-  let lastState = null;
-  function renderLanes(state) {
-    lastState = state;
-    const root = $('lanes'); root.replaceChildren();
-    const rows = state && state.rows;
-    CATS.forEach(([key, label, desc], i) => {
-      const r = rows ? rows[i] : null;
+  // ---------- The contract read panel
+  function renderCalls(state, animate) {
+    const root = $('calls'); root.replaceChildren();
+    CATS.forEach(([key], i) => {
+      const r = state && state.rows ? state.rows[i] : null;
+      const row = el('div', 'call');
+      const fn = el('span', 'fn'); fn.append('statusOf(', el('em', null, key), ')');
       const status = r ? r.status : 'UNKNOWN';
-      const dashed = !r || !r.fresh;
-      const lane = el('div', 'lane');
-      const cat = el('div', 'cat'); cat.append(el('h3', null, label), el('p', null, desc));
-      const toks = state && state.tokens ? state.tokens.filter((t) => t.category === key) : [];
-      const wire = el('div', 'wire s-' + status + (dashed ? ' dashed' : '') + (toks.length ? '' : ' end')); wire.append(pill(status));
-      lane.append(cat, docCell(r), wire, gateCell(r, toks, status, dashed));
-      root.append(lane);
+      const val = el('span', 'val t-' + status + (animate ? ' pending' : ''), status);
+      val.dataset.final = status;
+      const doc = el('span', 'doc', r ? (r.doc ? r.doc : r.fresh ? 'none' : 'stale') : '');
+      row.append(fn, val, doc);
+      root.append(row);
     });
   }
+  function renderTxs(state) {
+    const root = $('txs'); root.replaceChildren();
+    if (!state || !state.tokens) return;
+    for (const t of state.tokens) {
+      const ci = CATS.findIndex(([k]) => k === t.category);
+      const st = state.rows && ci >= 0 ? state.rows[ci].status : 'UNKNOWN';
+      let line;
+      if (t.allowed === true) { line = el('div', 'tx okay'); line.append(el('b', null, t.symbol + '.transfer(…)'), ' ', el('span', null, 'returns'), ' true'); }
+      else if (t.allowed === false) { line = el('div', 'tx rev'); line.append(el('b', null, t.symbol + '.transfer(…)'), ' ', el('span', null, 'reverts'), ' TransferBlockedByRegGate(' + ci + ', ' + st + ')'); }
+      else { line = el('div', 'tx'); line.append(el('b', null, t.symbol + '.transfer(…)'), ' ', el('span', null, 'unknown, treat as blocked')); }
+      root.append(line);
+    }
+  }
+  async function runRead(animate) {
+    const read = $('read');
+    const vals = [...document.querySelectorAll('#calls .val')];
+    const txs = [...document.querySelectorAll('#txs .tx')];
+    if (!animate || REDUCED) {
+      vals.forEach((v) => v.classList.remove('pending'));
+      txs.forEach((t) => t.classList.add('show'));
+      return;
+    }
+    read.classList.add('scanning');
+    await wait(450);
+    for (const v of vals) {
+      v.classList.remove('pending'); v.classList.add('arrive');
+      requestAnimationFrame(() => requestAnimationFrame(() => v.classList.remove('arrive')));
+      await wait(260);
+    }
+    await wait(220);
+    for (const t of txs) { t.classList.add('show'); await wait(320); }
+    await wait(500);
+    read.classList.remove('scanning');
+  }
 
-  // Contract events
+  // ---------- Metrics
+  function countUp(node, to) {
+    if (REDUCED || !Number.isFinite(to)) { node.textContent = Number.isFinite(to) ? String(to) : '?'; return; }
+    const from = 0, dur = 900, t0 = performance.now();
+    const step = (now) => {
+      const p = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - p, 4);
+      node.textContent = String(Math.round(from + (to - from) * e));
+      if (p < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }
+  let metricsShown = false, pendingMetrics = null, metricsVisible = false;
+  function tryShowMetrics() {
+    if (metricsShown || !metricsVisible || !pendingMetrics) return;
+    metricsShown = true;
+    countUp($('m1'), pendingMetrics.notClear); countUp($('m2'), pendingMetrics.blocked); countUp($('m3'), pendingMetrics.age); countUp($('m4'), 91);
+  }
+  function setMetrics(m) {
+    pendingMetrics = m;
+    $('m1s').textContent = '/ ' + CATS.length;
+    $('m2s').textContent = '/ ' + (m.tokens || 0);
+    $('m3s').textContent = m.unit;
+    const show = (v) => (Number.isFinite(v) ? String(v) : '?');
+    if (metricsShown) { $('m1').textContent = show(m.notClear); $('m2').textContent = show(m.blocked); $('m3').textContent = show(m.age); }
+    else tryShowMetrics();
+  }
+  const metricsObs = new IntersectionObserver((entries) => {
+    metricsVisible = entries.some((e) => e.isIntersecting);
+    tryShowMetrics();
+  }, { threshold: .2 });
+
+  // ---------- Board
+  function gateSvg() {
+    return svg('0 0 48 34', [
+      ['rect', { x: '2', y: '9', width: '5', height: '25', rx: '2.5', fill: 'currentColor' }],
+      ['rect', { x: '41', y: '16', width: '5', height: '18', rx: '2.5', fill: 'currentColor', opacity: '.45' }],
+      ['rect', { class: 'bar', x: '3', y: '9.5', width: '43', height: '5.5', rx: '2.75', fill: 'currentColor' }],
+    ]);
+  }
+  let boardSeen = false, boardVisible = false;
+  function tryAnimateGates() {
+    if (boardSeen || !boardVisible) return;
+    const pre = document.querySelectorAll('.tok.pre');
+    if (!pre.length) return;
+    boardSeen = true;
+    pre.forEach((n, i) => setTimeout(() => n.classList.remove('pre'), 150 + i * 180));
+  }
+  function renderBoard(state) {
+    const root = $('board'); root.replaceChildren();
+    CATS.forEach(([key, label, sub], i) => {
+      const r = state && state.rows ? state.rows[i] : null;
+      const status = r ? r.status : 'UNKNOWN';
+      const lane = el('div', 'lane');
+      const c = el('div'); c.append(el('div', 'cat', label), el('div', 'cat-sub', sub));
+      const d = el('div');
+      if (!r) d.append(el('p', 'title quiet', 'Status unreadable. Treat as BLOCK.'));
+      else if (!r.doc) d.append(el('p', 'title quiet', r.reported === 'OK' ? 'No matching publication in the window.' : 'No document recorded.'));
+      else if (!DOCNUM.test(r.doc)) d.append(el('p', 'title mono', r.doc));
+      else {
+        const info = titles.get(r.doc), known = info && typeof info === 'object';
+        d.append(el('p', 'title' + (known ? '' : ' quiet'), known ? info.title : info === 'pending' ? 'Loading the document title.' : 'Federal Register document'));
+        const src = el('div', 'src');
+        const what = known ? [info.agency, info.type.toLowerCase()].filter(Boolean).join(', ') : '';
+        if (what) src.append(what + ', ');
+        src.append(ext('https://www.federalregister.gov/d/' + r.doc, r.doc));
+        if (!r.fresh) src.append(' (last report)');
+        d.append(src);
+      }
+      if (r && r.latched) d.append(el('span', 'flag', 'Latched until a reviewer clears it'));
+      else if (r && !r.fresh && r.last) d.append(el('span', 'flag', 'BLOCK because the report is stale'));
+      const chip = el('span', 'chip t-' + status, status);
+      const toks = state && state.tokens ? state.tokens.filter((t) => t.category === key) : [];
+      let g;
+      if (!toks.length) g = el('div', 'none-tok', 'No demo token');
+      else {
+        g = el('div');
+        for (const t of toks) {
+          const a = t.allowed, tone = a === true ? 'OK' : a === false ? 'BLOCK' : 'UNKNOWN';
+          const box = el('div', 'tok t-' + tone + (a === true ? ' open' : ' shut') + (boardSeen || REDUCED ? '' : ' pre'));
+          const txt = el('div');
+          txt.append(el('b', null, t.symbol), el('span', 'st', a === true ? 'Transfers open' : a === false ? 'Transfers blocked' : 'Unknown'));
+          const why = a === null || a === undefined ? 'Unreadable, treat as blocked' : t.strict ? 'Strict: moves only on OK' : 'Lenient: stops only on BLOCK';
+          txt.append(el('span', 'why', why));
+          box.append(gateSvg(), txt);
+          g.append(box);
+        }
+      }
+      lane.append(c, d, chip, g);
+      root.append(lane);
+    });
+    requestAnimationFrame(tryAnimateGates);
+  }
+  const boardObs = new IntersectionObserver((entries) => {
+    boardVisible = entries.some((e) => e.isIntersecting);
+    tryAnimateGates();
+  }, { threshold: .35 });
+
+  // ---------- Events: contract events plus reports the contract rejected
   let feedKey = null;
   function decodeLog(l) {
     if (!l || !Array.isArray(l.topics) || typeof l.data !== 'string' || !/^0x[0-9a-fA-F]*$/.test(l.data)) return null;
     const t0 = String(l.topics[0]).toLowerCase();
-    const w = (i) => word(l.data, i);
     const time = l.blockTimestamp ? Number(BigInt(l.blockTimestamp)) : null;
     const base = { tx: /^0x[0-9a-fA-F]{64}$/.test(l.transactionHash) ? l.transactionHash : null,
       block: Number(BigInt(l.blockNumber)), index: Number(BigInt(l.logIndex || '0x0')), time };
     try {
       if (t0 === T_STATUS && l.topics.length >= 2) {
-        const asOf = Number(BigInt(l.topics[1]));
-        const sts = [0, 1, 2, 3].map((i) => STATUS[Number(uint(w(i)))] || 'unknown');
-        return { ...base, time: time || asOf, tone: 'REPORT', what: 'Report accepted',
-          detail: CATS.map(([, n], i) => n + ' ' + sts[i]).join(', ') + '.' };
+        const sts = [0, 1, 2, 3].map((i) => STATUS[Number(uint(word(l.data, i)))] || 'unknown');
+        const okCount = sts.filter((s) => s === 'OK').length;
+        const detail = CATS.map(([, n], i) => n + ' ' + sts[i]).join(', ');
+        return { ...base, time: time || Number(BigInt(l.topics[1])), what: 'Report accepted', tone: 'OK', detail: okCount + ' of 4 clear. ' + detail + '.' };
       }
       if ((t0 === T_LATCHED || t0 === T_CLEARED) && l.topics.length >= 2) {
-        const cat = Number(BigInt(l.topics[1]));
-        const doc = b32str(w(0)) || 'no document';
+        const cat = Number(BigInt(l.topics[1])), doc = b32str(word(l.data, 0)) || 'no document';
         const name = CATS[cat] ? CATS[cat][1] : 'Category ' + cat;
-        if (t0 === T_LATCHED) return { ...base, tone: 'BLOCK', what: 'BLOCK latched', detail: name + ', document ' + doc + '.' };
-        const by = l.topics[2] ? '0x' + String(l.topics[2]).slice(-40) : '';
-        return { ...base, tone: 'OK', what: 'Reviewer cleared a latch', detail: name + ', document ' + doc + (by ? ', by ' + shortAddr(by) : '') + '. The workflow re-checks now.' };
+        if (t0 === T_LATCHED) return { ...base, what: 'BLOCK latched', tone: 'BLOCK', detail: name + ', document ' + doc + '.' };
+        return { ...base, what: 'Reviewer cleared', tone: 'REVIEW', detail: name + ', document ' + doc + '. The workflow re-checks now.' };
+      }
+      if (t0 === T_PROCESSED && l.data.length >= 66 && BigInt(l.data.slice(0, 66)) === 0n) {
+        return { ...base, what: 'Report rejected', tone: 'BLOCK', detail: 'The contract refused it and nothing changed. The forwarder logged result false.' };
       }
     } catch { return null; }
     return null;
   }
-
-  async function loadFeed(gate, fromBlock, latest) {
+  async function getLogsChunked(filter, from, latest) {
+    const out = [];
+    for (let f = from; f <= latest; f += LOG_CHUNK) {
+      const to = Math.min(f + LOG_CHUNK - 1, latest);
+      const part = await rpc('eth_getLogs', [{ ...filter, fromBlock: '0x' + f.toString(16), toBlock: '0x' + to.toString(16) }]);
+      if (!Array.isArray(part)) throw new Error('bad logs');
+      out.push(...part.filter((l) => !l.removed));
+    }
+    return out;
+  }
+  async function loadFeed(dep, latest) {
     const list = $('events');
     try {
+      const gate = dep.regGateStatus.toLowerCase();
+      const fromBlock = Number(dep.fromBlock);
       const start = Math.max(Number.isInteger(fromBlock) && fromBlock > 0 ? fromBlock : latest - LOG_CHUNK, latest - LOG_CHUNK * LOG_MAX_CHUNKS);
-      const logs = [];
-      for (let from = start; from <= latest; from += LOG_CHUNK) {
-        const to = Math.min(from + LOG_CHUNK - 1, latest);
-        const part = await rpc('eth_getLogs', [{ address: gate, topics: [[T_STATUS, T_LATCHED, T_CLEARED]],
-          fromBlock: '0x' + from.toString(16), toBlock: '0x' + to.toString(16) }]);
-        if (!Array.isArray(part)) throw new Error('bad logs');
-        logs.push(...part.filter((l) => !l.removed && String(l.address).toLowerCase() === gate.toLowerCase()));
+      const own = (await getLogsChunked({ address: gate, topics: [[T_STATUS, T_LATCHED, T_CLEARED]] }, start, latest))
+        .filter((l) => String(l.address).toLowerCase() === gate);
+      let fwd = [];
+      if (ADDR.test(dep.forwarder || '')) {
+        try {
+          fwd = (await getLogsChunked({ address: dep.forwarder, topics: [T_PROCESSED, '0x' + gate.slice(2).padStart(64, '0')] }, start, latest))
+            .filter((l) => String(l.address).toLowerCase() === dep.forwarder.toLowerCase());
+        } catch { fwd = []; }
       }
-      const events = logs.map(decodeLog).filter(Boolean).sort((a, b) => b.block - a.block || b.index - a.index).slice(0, 8);
+      const events = [...own, ...fwd].map(decodeLog).filter(Boolean).sort((a, b) => b.block - a.block || b.index - a.index).slice(0, 8);
       list.replaceChildren();
-      if (!events.length) { const li = el('li'); li.append(el('span', 'ev-time', 'None yet'), el('span', null, 'The contract has not accepted a report.')); list.append(li); return; }
+      if (!events.length) { const li = el('li'); li.append(el('span', 't', 'none yet'), el('span', 'w', 'No reports yet')); list.append(li); return; }
       for (const e of events) {
         const li = el('li');
-        const time = el('span', 'ev-time');
-        const txt = e.time ? ago(e.time) : 'Block ' + e.block;
-        if (e.tx) time.append(ext('https://sepolia.etherscan.io/tx/' + e.tx, txt)); else time.append(txt);
-        if (e.time) time.title = fmt(e.time);
-        const what = el('span', 'ev-what s-' + e.tone);
-        what.append(ICON[e.tone](), e.what);
-        li.append(time, what, el('span', 'ev-detail', e.detail));
+        const w = el('span', 'w t-' + e.tone, e.what);
+        li.append(el('span', 't', e.time ? fmt(e.time) : 'block ' + e.block), w, el('span', 'd', e.detail),
+          e.tx ? ext('https://sepolia.etherscan.io/tx/' + e.tx, e.tx.slice(0, 6) + '…' + e.tx.slice(-4), 'x') : el('span', 'x', ''));
         list.append(li);
       }
     } catch {
-      const li = el('li'); li.append(el('span', 'ev-time', 'Unavailable'), el('span', null, 'Events could not be read right now. The statuses above come straight from the contract.'));
+      const li = el('li'); li.append(el('span', 't', 'unavailable'), el('span', 'w', 'Events unreadable'), el('span', 'd', 'Statuses above come straight from the contract.'));
       list.replaceChildren(li);
-      feedKey = null; // retry on the next refresh
+      feedKey = null;
     }
   }
 
+  // ---------- Page state
+  function setLive(kind, text) { $('live').className = 'live ' + kind; $('livetext').textContent = text; }
+  function setAlert(strong, text) {
+    const a = $('alert'); a.replaceChildren();
+    a.hidden = !strong;
+    if (strong) { const s = el('div'); s.append(el('b', null, strong + ' '), text); a.append(s); }
+  }
+
+  let lastSig = null, firstRun = true, lastState = null;
   async function load() {
     let dep;
     try {
@@ -513,78 +573,75 @@
       dep = await r.json();
       if (!ADDR.test(dep.regGateStatus)) throw new Error('bad address');
     } catch {
-      setNet(false, 'Not deployed');
-      $('verdict').textContent = 'The contract is not deployed yet.';
-      setContext(['Statuses appear here once RegGateStatus is live on Sepolia.']);
-      setAlert(null);
-      $('events').replaceChildren(el('li', null, 'No contract yet.'));
-      renderLanes(null);
+      setLive('bad', 'Not deployed');
+      $('read-addr').textContent = 'not deployed';
+      setAlert('Not deployed.', 'Statuses appear once RegGateStatus is live on Sepolia.');
+      renderCalls(null, false); renderBoard(null); runRead(false);
       return;
     }
     const gate = dep.regGateStatus;
-    const contractLink = ext('https://sepolia.etherscan.io/address/' + gate, shortAddr(gate), 'mono');
+    const scan = 'https://sepolia.etherscan.io/address/' + gate;
+    $('nav-contract').href = scan; $('cta-contract').href = scan;
+    $('read-addr').textContent = shortAddr(gate);
 
+    let state;
     try {
       const chain = await rpc('eth_chainId', []);
       if (chain.toLowerCase() !== SEPOLIA_HEX) throw new Error('wrong chain ' + chain);
       const [lastHex, maxHex] = await Promise.all([call(gate, SEL.lastAsOf), call(gate, SEL.maxAge)]);
-      const last = Number(uint(word(lastHex, 0)));
-      const maxAge = Number(uint(word(maxHex, 0)));
-      // Judge freshness by chain time, the same clock the contract uses, not the viewer's clock.
+      const last = Number(uint(word(lastHex, 0))), maxAge = Number(uint(word(maxHex, 0)));
+      // Freshness by chain time, the same clock the contract uses.
       const block = await rpc('eth_getBlockByNumber', ['latest', false]).catch(() => null);
       chainNow = block && block.timestamp ? Number(BigInt(block.timestamp)) : Math.floor(Date.now() / 1000);
       const latestBlock = block && block.number ? Number(BigInt(block.number)) : null;
       const fresh = last > 0 && chainNow <= last + maxAge;
-
       const rows = await Promise.all(CATS.map(async (_, i) => {
-        const [s, rep, latch] = await Promise.all([
-          call(gate, SEL.statusOf + arg8(i)), call(gate, SEL.reportedStatus + arg8(i)), call(gate, SEL.latchInfo + arg8(i))]);
-        const st = Number(uint(word(s, 0)));
-        const rs = Number(uint(word(rep, 0)));
+        const [s, rep, latch] = await Promise.all([call(gate, SEL.statusOf + arg8(i)), call(gate, SEL.reportedStatus + arg8(i)), call(gate, SEL.latchInfo + arg8(i))]);
+        const st = Number(uint(word(s, 0))), rs = Number(uint(word(rep, 0)));
         if (!(st in STATUS) || !(rs in STATUS)) throw new Error('bad status value');
         return { status: STATUS[st], reported: STATUS[rs], doc: last ? b32str(word(rep, 1)) : '', latched: uint(word(latch, 0)) === 1n, fresh, last };
       }));
       const tokens = (dep.tokens || []).filter((t) => ADDR.test(t.address)).map((t) => ({ ...t }));
-      await Promise.all(tokens.map(async (t) => {
-        try { t.allowed = uint(word(await call(t.address, SEL.transfersAllowed), 0)) === 1n; } catch { t.allowed = null; }
-      }));
+      await Promise.all(tokens.map(async (t) => { try { t.allowed = uint(word(await call(t.address, SEL.transfersAllowed), 0)) === 1n; } catch { t.allowed = null; } }));
+      state = { rows, tokens, last, maxAge, fresh, latestBlock };
 
-      setNet(true, 'Live on Sepolia');
-      if (!last) {
-        $('verdict').textContent = 'No report yet, so every transfer is blocked.';
-        setAlert('Every category reads BLOCK until the workflow writes its first report.');
-        setContext(['Contract ', contractLink, '.']);
-      } else {
-        setContext(['Last report ', el('b', null, ago(last)), ' (' + fmt(last) + '). ',
-          fresh ? 'Fresh until ' : 'Went stale ', el('b', null, fmt(last + maxAge)), '. Contract ', contractLink, '.']);
-        if (!fresh) {
-          $('verdict').textContent = 'The last report is stale, so every transfer is blocked.';
-          setAlert('No fresh report arrived within the freshness limit. That is the fail-closed design working: silence blocks transfers. It does not mean this page is broken.');
-        } else {
-          const clear = rows.filter((r) => r.status === 'OK').length;
-          const toks = tokens.map((t) => t.symbol + (t.allowed === true ? ' can move' : ' is blocked'));
-          const tokText = toks.length ? ' ' + toks.join(', ').replace(/, ([^,]*)$/, ' and $1') + '.' : '';
-          $('verdict').textContent = clear + ' of ' + rows.length + ' categories ' + (clear === 1 ? 'is' : 'are') + ' clear.' + tokText;
-          setAlert(null);
-        }
-      }
-      const state = { rows, tokens };
-      renderLanes(state);
+      if (!last) { setLive('bad', 'No report yet'); setAlert('No report yet.', 'Every category reads BLOCK until the workflow writes its first report.'); }
+      else if (!fresh) { setLive('bad', 'Stale on Sepolia'); setAlert('Stale, so every transfer is blocked.', 'No fresh report arrived within the freshness limit. That is the fail-closed design working: silence blocks transfers.'); }
+      else { setLive('ok', 'Live on Sepolia'); setAlert(null); }
+      $('read-net').textContent = latestBlock ? 'eth_call, block ' + latestBlock.toLocaleString('en-US') : 'eth_call, Sepolia';
+      $('read-last').textContent = last ? 'last report ' + fmt(last) : 'no report yet';
+      $('read-until').textContent = last ? (fresh ? 'fresh until ' : 'stale since ') + fmt(last + maxAge) : '';
+      $('window').textContent = last ? 'report of ' + fmtDay(last) + (fresh ? '' : ', stale') : 'no report yet';
+      const days = maxAge % 86400 === 0;
+      setMetrics({ notClear: rows.filter((r) => r.status !== 'OK').length, blocked: tokens.filter((t) => t.allowed !== true).length, tokens: tokens.length,
+        age: days ? maxAge / 86400 : Math.round(maxAge / 3600), unit: days ? (maxAge === 86400 ? 'day' : 'days') : 'hours' });
+    } catch {
+      setLive('bad', 'Sepolia unreachable');
+      setAlert('Sepolia is unreachable.', 'Showing UNKNOWN rather than guessing, so treat every transfer as blocked. Retrying every minute.');
+      state = { rows: null, tokens: (dep.tokens || []).filter((t) => ADDR.test(t.address)).map((t) => ({ ...t, allowed: null })) };
+      setMetrics({ notClear: NaN, blocked: NaN, tokens: state.tokens.length, age: NaN, unit: 'days' });
+      $('read-last').textContent = 'last report unknown'; $('read-until').textContent = '';
+    }
 
-      // Titles and events are extras: they never change a status, and failures fall back quietly.
-      loadTitles(rows.map((r) => r.doc).filter(Boolean)).then((changed) => { if (changed && lastState === state) renderLanes(state); });
-      const key = gate + '|' + last + '|' + rows.map((r) => (r.latched ? 1 : 0)).join('');
-      if (latestBlock && key !== feedKey) { feedKey = key; loadFeed(gate, Number(dep.fromBlock), latestBlock); }
-    } catch (e) {
-      setNet(false, 'Sepolia unreachable');
-      $('verdict').textContent = 'Sepolia is unreachable right now, so treat every transfer as blocked.';
-      setContext(['Showing UNKNOWN rather than guessing. Retrying every minute. Contract ', contractLink, '.']);
-      setAlert(null);
-      renderLanes({ rows: null, tokens: (dep.tokens || []).filter((t) => ADDR.test(t.address)).map((t) => ({ ...t, allowed: null })) });
+    lastState = state;
+    const sig = JSON.stringify([state.rows && state.rows.map((r) => [r.status, r.doc, r.latched, r.fresh]), state.tokens.map((t) => t.allowed)]);
+    const changed = sig !== lastSig; lastSig = sig;
+    if (changed) {
+      renderCalls(state, state.rows != null); renderTxs(state); renderBoard(state);
+      runRead(state.rows != null && (firstRun || changed));
+    }
+    firstRun = false;
+
+    if (state.rows) {
+      loadTitles(state.rows.map((r) => r.doc).filter(Boolean)).then((did) => { if (did && lastState === state) renderBoard(state); });
+      const key = gate + '|' + state.last + '|' + state.rows.map((r) => (r.latched ? 1 : 0)).join('');
+      if (state.latestBlock && key !== feedKey) { feedKey = key; loadFeed(dep, state.latestBlock); }
     }
   }
 
-  renderLanes(null);
+  renderCalls(null, true); renderBoard(null);
+  metricsObs.observe(document.querySelector('.metrics'));
+  boardObs.observe($('board'));
   load();
   setInterval(load, 60000);
 })();

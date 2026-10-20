@@ -1,6 +1,7 @@
 {
   "chainId": 11155111,
   "regGateStatus": "0x03d0df9e8ef2785b241eacca9460a60dd4daa075",
+  "forwarder": "0x15fC6ae953E024d975e77382eEeC56A9101f9F88",
   "fromBlock": 11945381,
   "tokens": [
     {

@@ -107,6 +107,7 @@ for (const f of ['config.staging.json', 'config.production.json']) {
 writeJson(join(ROOT, 'docs', 'deployment.json'), {
 	chainId: SEPOLIA_CHAIN_ID,
 	regGateStatus: gate.address,
+	forwarder, // the status page reads rejected reports from the forwarder's log
 	fromBlock: gate.block, // the status page reads contract events from here
 	tokens: deployment.tokens.map(({ symbol, category, strict, address }) => ({ symbol, category, strict, address })),
 })
