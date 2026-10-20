@@ -3,11 +3,21 @@
 // and that every failure mode writes nothing on-chain.
 
 import { describe, expect } from 'bun:test'
-import { getNetwork, TxStatus } from '@chainlink/cre-sdk'
+import { getNetwork, protoBigIntToBigint, TxStatus } from '@chainlink/cre-sdk'
 import { EvmMock, HttpActionsMock, newTestRuntime, REPORT_METADATA_HEADER_LENGTH, test } from '@chainlink/cre-sdk/test'
-import { bytesToHex, decodeAbiParameters, hexToBytes, hexToString, pad, toHex, type Hex } from 'viem'
-import { CATEGORIES, Status } from './regGate'
-import { type Config, LATCH_CLEARED_TOPIC, onCronTrigger, onLatchCleared } from './workflow'
+import {
+	bytesToHex,
+	decodeAbiParameters,
+	decodeFunctionData,
+	encodeFunctionResult,
+	hexToBytes,
+	hexToString,
+	pad,
+	toHex,
+	type Hex,
+} from 'viem'
+import { CATEGORIES, docToBytes32, type OnChainState, Status } from './regGate'
+import { type Config, LATCH_CLEARED_TOPIC, onCronTrigger, onLatchCleared, STATUS_READ_ABI } from './workflow'
 
 const config: Config = {
 	schedule: '0 0 */6 * * *',
@@ -299,5 +309,173 @@ describe('onLatchCleared (reviewer override re-verifies immediately)', () => {
 		const runtime = newTestRuntime(null, donTime, config)
 		expect(() => onLatchCleared(runtime as any, clearLog())).toThrow('status 503')
 		expect(seen.writes).toHaveLength(0)
+	})
+})
+
+// ---------------------------------------------------------------------------
+// Heartbeat (read before write) and mirror chains
+// ---------------------------------------------------------------------------
+
+const baseSepolia = getNetwork({
+	chainFamily: 'evm',
+	chainSelectorName: 'ethereum-testnet-sepolia-base-1',
+	isTestnet: true,
+})!
+const MIRROR_RECEIVER = '0x000000000000000000000000000000000000bA5E'
+const withMirror: Config = {
+	...config,
+	mirrors: [
+		{
+			chainSelectorName: 'ethereum-testnet-sepolia-base-1',
+			isTestnet: true,
+			receiverAddress: MIRROR_RECEIVER,
+			gasLimit: '1000000',
+		},
+	],
+}
+
+/** What the live-shaped data produces, as the contract would already hold it. */
+const LIVE_ON_CHAIN = (lastAsOf: bigint): OnChainState => ({
+	lastAsOf,
+	maxAge: 7n * 86_400n,
+	statuses: [Status.OK, Status.REVIEW, Status.REVIEW, Status.OK],
+	triggerDocs: ['', '2026-20466', '2026-20888', ''].map(docToBytes32),
+})
+
+/** Serve the contract's views on one chain from `state`; 'fail' makes every read error. */
+function onChain(selector: bigint, state: OnChainState | 'fail') {
+	const reads: { fn: string; finalized: boolean }[] = []
+	const mock = EvmMock.testInstance(selector)
+	mock.callContract = (req) => {
+		const data = bytesToHex(req.call!.data)
+		const { functionName, args } = decodeFunctionData({ abi: STATUS_READ_ABI, data })
+		// LAST_FINALIZED_BLOCK_NUMBER is encoded as block -3.
+		reads.push({ fn: functionName, finalized: req.blockNumber !== undefined && protoBigIntToBigint(req.blockNumber) === -3n })
+		if (state === 'fail') throw new Error('rpc unavailable')
+		const result =
+			functionName === 'lastAsOf'
+				? state.lastAsOf
+				: functionName === 'maxAge'
+					? state.maxAge
+					: [state.statuses[Number(args![0])], state.triggerDocs[Number(args![0])]]
+		return { data: hexToBytes(encodeFunctionResult({ abi: STATUS_READ_ABI, functionName, result } as any)) }
+	}
+	return reads
+}
+
+/** Capture writes on a second chain (wire() only hooks the primary). */
+function captureWrites(selector: bigint, status = TxStatus.SUCCESS) {
+	const writes: { receiver: Hex; payload: Hex }[] = []
+	const mock = EvmMock.testInstance(selector)
+	mock.writeReport = (input) => {
+		const raw = input.report?.rawReport ?? new Uint8Array()
+		writes.push({ receiver: bytesToHex(input.receiver), payload: bytesToHex(raw.slice(REPORT_METADATA_HEADER_LENGTH)) })
+		return status === TxStatus.SUCCESS
+			? { txStatus: TxStatus.SUCCESS, txHash: new Uint8Array(32).fill(0xcd) }
+			: { txStatus: status, errorMessage: 'out of gas' }
+	}
+	return writes
+}
+
+const HOUR = 3600n
+
+describe('heartbeat: read the chain first, write only when it matters', () => {
+	const live = { status: 200, body: JSON.stringify(LIVE_RESULTS) }
+
+	test('unchanged status and a fresh report: reads at the finalized block, writes nothing', () => {
+		const seen = wire(live)
+		const reads = onChain(network.chainSelector.selector, LIVE_ON_CHAIN(BigInt(NOW) - 6n * HOUR))
+		const summary = onCronTrigger(newTestRuntime(null, donTime, config) as any, payload)
+		expect(seen.writes).toHaveLength(0)
+		expect(summary).toContain('ethereum-testnet-sepolia=skipped')
+		expect(reads.map((r) => r.fn)).toEqual(['lastAsOf', 'maxAge', 'reportedStatus', 'reportedStatus', 'reportedStatus', 'reportedStatus'])
+		expect(reads.every((r) => r.finalized)).toBe(true)
+	})
+
+	test('unchanged status but the heartbeat is due: writes', () => {
+		const seen = wire(live)
+		onChain(network.chainSelector.selector, LIVE_ON_CHAIN(BigInt(NOW) - 25n * HOUR))
+		const summary = onCronTrigger(newTestRuntime(null, donTime, config) as any, payload)
+		expect(seen.writes).toHaveLength(1)
+		expect(summary).toContain('ethereum-testnet-sepolia=written')
+	})
+
+	test('a changed trigger document writes, even with a fresh report', () => {
+		const seen = wire(live)
+		const stale = LIVE_ON_CHAIN(BigInt(NOW) - HOUR)
+		stale.triggerDocs[idx('DIGITAL_ASSET_MARKETS')] = docToBytes32('2026-21128')
+		onChain(network.chainSelector.selector, stale)
+		onCronTrigger(newTestRuntime(null, donTime, config) as any, payload)
+		expect(seen.writes).toHaveLength(1)
+	})
+
+	test('an unreadable chain is never treated as unchanged: writes', () => {
+		const seen = wire(live)
+		onChain(network.chainSelector.selector, 'fail')
+		onCronTrigger(newTestRuntime(null, donTime, config) as any, payload)
+		expect(seen.writes).toHaveLength(1)
+	})
+
+	test('the LatchCleared re-check follows the same rule', () => {
+		const seen = wire(live)
+		onChain(network.chainSelector.selector, LIVE_ON_CHAIN(BigInt(NOW) - HOUR))
+		const summary = onLatchCleared(newTestRuntime(null, donTime, config) as any, clearLog())
+		expect(seen.urls).toHaveLength(2) // it still re-verified against the Federal Register
+		expect(seen.writes).toHaveLength(0)
+		expect(summary).toContain('=skipped')
+	})
+})
+
+describe('mirror chains: the same status on Base Sepolia', () => {
+	const live = { status: 200, body: JSON.stringify(LIVE_RESULTS) }
+
+	test('one agreed result, one report per chain, each bound to its own chain ID', () => {
+		const seen = wire(live)
+		const baseWrites = captureWrites(baseSepolia.chainSelector.selector)
+		const summary = onCronTrigger(newTestRuntime(null, donTime, withMirror) as any, payload)
+
+		expect(seen.urls).toHaveLength(2) // fetched once, not once per chain
+		expect(seen.writes).toHaveLength(1)
+		expect(baseWrites).toHaveLength(1)
+		expect(baseWrites[0].receiver.toLowerCase()).toBe(MIRROR_RECEIVER.toLowerCase())
+
+		const [sepoliaChain, sepoliaAsOf, sepoliaStatuses] = decode(seen.writes[0].payload)
+		const [baseChain, baseAsOf, baseStatuses] = decode(baseWrites[0].payload)
+		expect(sepoliaChain).toBe(11155111n)
+		expect(baseChain).toBe(84532n)
+		expect(baseAsOf).toBe(sepoliaAsOf)
+		expect([...baseStatuses]).toEqual([...sepoliaStatuses])
+		expect(summary).toContain('ethereum-testnet-sepolia=written ethereum-testnet-sepolia-base-1=written')
+	})
+
+	test('each chain decides for itself: Sepolia unchanged skips, Base with no report writes', () => {
+		const seen = wire(live)
+		onChain(network.chainSelector.selector, LIVE_ON_CHAIN(BigInt(NOW) - HOUR))
+		onChain(baseSepolia.chainSelector.selector, { ...LIVE_ON_CHAIN(0n) })
+		const baseWrites = captureWrites(baseSepolia.chainSelector.selector)
+		onCronTrigger(newTestRuntime(null, donTime, withMirror) as any, payload)
+		expect(seen.writes).toHaveLength(0)
+		expect(baseWrites).toHaveLength(1)
+	})
+
+	test('a failed mirror write does not stop the primary, and the run still fails loudly', () => {
+		const seen = wire(live)
+		captureWrites(baseSepolia.chainSelector.selector, TxStatus.REVERTED)
+		expect(() => onCronTrigger(newTestRuntime(null, donTime, withMirror) as any, payload)).toThrow(
+			'Failed to write report: ethereum-testnet-sepolia-base-1: out of gas',
+		)
+		expect(seen.writes).toHaveLength(1) // Sepolia was still written
+	})
+
+	test('an exception on one chain does not stop the next one', () => {
+		wire(live)
+		EvmMock.testInstance(network.chainSelector.selector).writeReport = () => {
+			throw new Error('sepolia rpc timeout')
+		}
+		const baseWrites = captureWrites(baseSepolia.chainSelector.selector)
+		expect(() => onCronTrigger(newTestRuntime(null, donTime, withMirror) as any, payload)).toThrow(
+			'ethereum-testnet-sepolia: sepolia rpc timeout',
+		)
+		expect(baseWrites).toHaveLength(1) // Base Sepolia was still written
 	})
 })

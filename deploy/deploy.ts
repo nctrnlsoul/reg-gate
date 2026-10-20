@@ -1,41 +1,50 @@
-// Deploys Reg-Gate to Sepolia:
+// Deploys Reg-Gate.
+//
+// Sepolia (the primary chain, default):
 //   1. RegGateStatus (the receiver the CRE workflow writes to)
 //   2. Two demo GatedTokens:
 //        gUSD  gated on STABLECOINS, lenient (blocks only on BLOCK)
 //        gAST  gated on DIGITAL_ASSET_MARKETS, strict (passes only on OK)
-// Then points the workflow config and the status page at the new contract.
+//   Then points the workflow config and the status page at the new contract.
 //
-//   bun deploy/deploy.ts                       # simulation forwarder (default)
-//   bun deploy/deploy.ts --forwarder 0x...     # another forwarder
+// Base Sepolia (the mirror, --network base-sepolia):
+//   RegGateStatus only, then adds it to the workflow config as a mirror chain.
+//   The workflow writes the same agreed status there, bound to Base Sepolia's chain ID.
+//
+//   bun deploy/deploy.ts                          # Sepolia, simulation forwarder
+//   bun deploy/deploy.ts --network base-sepolia   # Base Sepolia mirror
+//   bun deploy/deploy.ts --forwarder 0x...        # another forwarder
 //   bun deploy/deploy.ts --max-age-days 7
 //
-// Sepolia only. Key comes from .env and is never printed.
+// Testnets only. Key comes from .env and is never printed.
 
-import { mkdirSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { parseArgs } from 'node:util'
 import { formatEther, parseEther, type Address } from 'viem'
 import {
-	assertSepolia,
+	assertChain,
 	clients,
-	DEPLOYMENT_FILE,
 	type Deployment,
-	etherscan,
+	deploymentFile,
 	loadArtifact,
+	networkArg,
 	parseAddressArg,
 	ROOT,
-	SEPOLIA_CHAIN_ID,
-	SIM_FORWARDER_SEPOLIA,
 	writeJson,
 } from './lib'
 
 const { values } = parseArgs({
 	options: {
+		network: { type: 'string', default: 'sepolia' },
 		forwarder: { type: 'string' },
 		'max-age-days': { type: 'string', default: '7' },
 		reviewer: { type: 'string' },
 	},
 })
+
+const net = networkArg(values.network)
+const isMirror = net.name !== 'sepolia'
 
 const maxAgeDays = Number(values['max-age-days'])
 if (!Number.isInteger(maxAgeDays) || maxAgeDays < 1 || maxAgeDays > 30) {
@@ -43,21 +52,24 @@ if (!Number.isInteger(maxAgeDays) || maxAgeDays < 1 || maxAgeDays > 30) {
 }
 const maxAge = maxAgeDays * 86_400
 
-const { publicClient, walletClient, account } = clients(true)
-await assertSepolia(publicClient)
+const { publicClient, walletClient, account } = clients(true, net)
+await assertChain(publicClient, net)
 
 const deployer = account!.address
-const forwarder = parseAddressArg(values.forwarder, SIM_FORWARDER_SEPOLIA, '--forwarder')
+const forwarder = parseAddressArg(values.forwarder, net.simForwarder, '--forwarder')
 const reviewer = parseAddressArg(values.reviewer, deployer, '--reviewer')
 
 const balance = await publicClient.getBalance({ address: deployer })
+console.log(`Network:   ${net.label} (${net.chainId})${isMirror ? ', mirror' : ''}`)
 console.log(`Deployer:  ${deployer}`)
-console.log(`Balance:   ${formatEther(balance)} Sepolia ETH`)
-console.log(`Forwarder: ${forwarder}${forwarder === SIM_FORWARDER_SEPOLIA ? ' (simulation forwarder)' : ''}`)
+console.log(`Balance:   ${formatEther(balance)} ${net.label} ETH`)
+console.log(`Forwarder: ${forwarder}${forwarder === net.simForwarder ? ' (simulation forwarder)' : ''}`)
 console.log(`Reviewer:  ${reviewer}`)
 console.log(`Max age:   ${maxAgeDays} days\n`)
 if (balance < parseEther('0.005')) {
-	throw new Error('Balance below 0.005 Sepolia ETH. Fund the burner from a faucet first (bun deploy/address.ts shows the address).')
+	throw new Error(
+		`Balance below 0.005 ${net.label} ETH. Fund the burner from a faucet first (bun deploy/address.ts shows the address).`,
+	)
 }
 
 async function deploy(name: 'RegGateStatus' | 'GatedToken', args: unknown[]) {
@@ -73,45 +85,72 @@ async function deploy(name: 'RegGateStatus' | 'GatedToken', args: unknown[]) {
 console.log('Deploying RegGateStatus...')
 const gate = await deploy('RegGateStatus', [forwarder, BigInt(maxAge), reviewer])
 
-console.log('Deploying demo tokens...')
-const supply = parseEther('1000000')
-const gUSD = await deploy('GatedToken', ['Gated USD (Reg-Gate demo)', 'gUSD', gate.address, 0, false, supply])
-const gAST = await deploy('GatedToken', ['Gated Asset (Reg-Gate demo)', 'gAST', gate.address, 2, true, supply])
+const tokens: Deployment['tokens'] = []
+if (!isMirror) {
+	console.log('Deploying demo tokens...')
+	const supply = parseEther('1000000')
+	const gUSD = await deploy('GatedToken', ['Gated USD (Reg-Gate demo)', 'gUSD', gate.address, 0, false, supply])
+	const gAST = await deploy('GatedToken', ['Gated Asset (Reg-Gate demo)', 'gAST', gate.address, 2, true, supply])
+	tokens.push(
+		{ symbol: 'gUSD', category: 'STABLECOINS', strict: false, address: gUSD.address, tx: gUSD.tx },
+		{ symbol: 'gAST', category: 'DIGITAL_ASSET_MARKETS', strict: true, address: gAST.address, tx: gAST.tx },
+	)
+}
 
 const deployment: Deployment = {
-	network: 'sepolia',
-	chainId: SEPOLIA_CHAIN_ID,
+	network: net.name,
+	chainId: net.chainId,
 	deployedAt: new Date().toISOString(),
 	deployer,
 	forwarder,
 	maxAgeSeconds: maxAge,
 	reviewer,
 	regGateStatus: { address: gate.address, tx: gate.tx },
-	tokens: [
-		{ symbol: 'gUSD', category: 'STABLECOINS', strict: false, address: gUSD.address, tx: gUSD.tx },
-		{ symbol: 'gAST', category: 'DIGITAL_ASSET_MARKETS', strict: true, address: gAST.address, tx: gAST.tx },
-	],
+	tokens,
 }
-mkdirSync(dirname(DEPLOYMENT_FILE), { recursive: true })
-writeJson(DEPLOYMENT_FILE, deployment)
+const depFile = deploymentFile(net)
+mkdirSync(dirname(depFile), { recursive: true })
+writeJson(depFile, deployment)
 
-// Point the workflow at the real receiver.
+// Point the workflow at the new receiver: the primary address, or a mirror entry.
 for (const f of ['config.staging.json', 'config.production.json']) {
 	const p = join(ROOT, 'reg-gate-workflow', f)
 	const cfg = JSON.parse(readFileSync(p, 'utf-8'))
-	cfg.receiverAddress = gate.address
+	if (isMirror) {
+		const others = (cfg.mirrors ?? []).filter((m: { chainSelectorName: string }) => m.chainSelectorName !== net.creChainName)
+		cfg.mirrors = [
+			...others,
+			{ chainSelectorName: net.creChainName, isTestnet: true, receiverAddress: gate.address, gasLimit: '1000000' },
+		]
+	} else {
+		cfg.receiverAddress = gate.address
+	}
 	writeJson(p, cfg)
 }
 
-// Point the status page at it.
-writeJson(join(ROOT, 'docs', 'deployment.json'), {
-	chainId: SEPOLIA_CHAIN_ID,
-	regGateStatus: gate.address,
-	forwarder, // the status page reads rejected reports from the forwarder's log
-	fromBlock: gate.block, // the status page reads contract events from here
-	tokens: deployment.tokens.map(({ symbol, category, strict, address }) => ({ symbol, category, strict, address })),
-})
+// Point the status page at it, keeping whatever the other network already recorded.
+const pagePath = join(ROOT, 'docs', 'deployment.json')
+const page = existsSync(pagePath) ? JSON.parse(readFileSync(pagePath, 'utf-8')) : {}
+if (isMirror) {
+	const others = (page.mirrors ?? []).filter((m: { chainId: number }) => m.chainId !== net.chainId)
+	page.mirrors = [
+		...others,
+		{ name: net.label, chainId: net.chainId, regGateStatus: gate.address, forwarder, fromBlock: gate.block, explorer: net.explorer },
+	]
+	writeJson(pagePath, page)
+} else {
+	writeJson(pagePath, {
+		chainId: net.chainId,
+		regGateStatus: gate.address,
+		forwarder, // the status page reads rejected reports from the forwarder's log
+		fromBlock: gate.block, // the status page reads contract events from here
+		tokens: tokens.map(({ symbol, category, strict, address }) => ({ symbol, category, strict, address })),
+		...(page.mirrors ? { mirrors: page.mirrors } : {}),
+	})
+}
 
-console.log(`\nDone. RegGateStatus: ${etherscan('address', gate.address)}`)
-console.log('Updated: reg-gate-workflow/config.*.json, docs/deployment.json, deploy/deployments/sepolia.json')
-console.log('\nNext: cre workflow simulate reg-gate-workflow --target staging-settings --non-interactive --trigger-index 0 --broadcast')
+console.log(`\nDone. RegGateStatus: ${net.explorer}/address/${gate.address}`)
+console.log(`Updated: reg-gate-workflow/config.*.json, docs/deployment.json, deploy/deployments/${net.name}.json`)
+console.log(
+	'\nNext: cre workflow simulate reg-gate-workflow --target staging-settings --non-interactive --trigger-index 0 --broadcast',
+)

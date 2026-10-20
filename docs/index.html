@@ -223,7 +223,7 @@
     <div class="metric"><div class="num"><span id="m1">…</span><small id="m1s">/ 4</small></div><div class="mlabel">Categories not clear</div></div>
     <div class="metric"><div class="num"><span id="m2">…</span><small id="m2s">/ 2</small></div><div class="mlabel">Demo tokens blocked</div></div>
     <div class="metric"><div class="num"><span id="m3">…</span><small id="m3s">days</small></div><div class="mlabel">Until silence reads BLOCK</div></div>
-    <div class="metric"><div class="num"><span id="m4">110</span></div><div class="mlabel">Tests, every planted bug caught</div></div>
+    <div class="metric"><div class="num"><span id="m4">129</span></div><div class="mlabel">Tests, every planted bug caught</div></div>
   </section>
 
   <section class="section" id="status">
@@ -405,7 +405,7 @@
   function tryShowMetrics() {
     if (metricsShown || !metricsVisible || !pendingMetrics) return;
     metricsShown = true;
-    countUp($('m1'), pendingMetrics.notClear); countUp($('m2'), pendingMetrics.blocked); countUp($('m3'), pendingMetrics.age); countUp($('m4'), 110);
+    countUp($('m1'), pendingMetrics.notClear); countUp($('m2'), pendingMetrics.blocked); countUp($('m3'), pendingMetrics.age); countUp($('m4'), 129);
   }
   function setMetrics(m) {
     pendingMetrics = m;

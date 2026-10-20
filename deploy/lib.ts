@@ -4,7 +4,8 @@
 //   - The private key is read ONLY from the CRE_ETH_PRIVATE_KEY environment
 //     variable. Run from the project root and Bun loads it from .env for you.
 //     It is never printed, logged, or written anywhere.
-//   - Sepolia only. Any other chain ID aborts before a single transaction.
+//   - Testnets only: Sepolia, plus Base Sepolia for the mirror. Any other chain ID
+//     aborts before a single transaction.
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
@@ -18,7 +19,7 @@ import {
 	type Hex,
 } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
-import { sepolia } from 'viem/chains'
+import { baseSepolia, sepolia } from 'viem/chains'
 
 export const SEPOLIA_CHAIN_ID = 11155111
 export const DEFAULT_RPC = 'https://ethereum-sepolia-rpc.publicnode.com'
@@ -26,6 +27,54 @@ export const DEFAULT_RPC = 'https://ethereum-sepolia-rpc.publicnode.com'
 // Source: docs.chain.link CRE Forwarder Directory (checked 2026-10-18).
 // Confirm for your org with: cre workflow supported-chains
 export const SIM_FORWARDER_SEPOLIA: Address = '0x15fC6ae953E024d975e77382eEeC56A9101f9F88'
+
+// Base Sepolia mirror. MockKeystoneForwarder from `cre workflow supported-chains`
+// (ethereum-testnet-sepolia-base-1, checked 2026-10-20; bytecode present on chain).
+export const BASE_SEPOLIA_CHAIN_ID = 84532
+export const SIM_FORWARDER_BASE_SEPOLIA: Address = '0x82300bd7c3958625581cc2f77bc6464dcecdf3e5'
+
+export interface Network {
+	name: 'sepolia' | 'base-sepolia'
+	label: string
+	chain: typeof sepolia | typeof baseSepolia
+	chainId: number
+	creChainName: string // chain selector name the CRE workflow uses
+	rpcEnv: string
+	defaultRpc: string
+	simForwarder: Address
+	explorer: string
+}
+
+export const NETWORKS: Record<Network['name'], Network> = {
+	sepolia: {
+		name: 'sepolia',
+		label: 'Sepolia',
+		chain: sepolia,
+		chainId: SEPOLIA_CHAIN_ID,
+		creChainName: 'ethereum-testnet-sepolia',
+		rpcEnv: 'SEPOLIA_RPC_URL',
+		defaultRpc: DEFAULT_RPC,
+		simForwarder: SIM_FORWARDER_SEPOLIA,
+		explorer: 'https://sepolia.etherscan.io',
+	},
+	'base-sepolia': {
+		name: 'base-sepolia',
+		label: 'Base Sepolia',
+		chain: baseSepolia,
+		chainId: BASE_SEPOLIA_CHAIN_ID,
+		creChainName: 'ethereum-testnet-sepolia-base-1',
+		rpcEnv: 'BASE_SEPOLIA_RPC_URL',
+		defaultRpc: 'https://base-sepolia-rpc.publicnode.com',
+		simForwarder: SIM_FORWARDER_BASE_SEPOLIA,
+		explorer: 'https://sepolia.basescan.org',
+	},
+}
+
+export function networkArg(value: string | undefined): Network {
+	const name = value ?? 'sepolia'
+	if (name !== 'sepolia' && name !== 'base-sepolia') throw new Error('--network must be sepolia or base-sepolia')
+	return NETWORKS[name]
+}
 
 export const CATEGORIES = ['STABLECOINS', 'TOKENIZED_SECURITIES', 'DIGITAL_ASSET_MARKETS', 'AML_SANCTIONS'] as const
 export const STATUS = ['OK', 'REVIEW', 'BLOCK'] as const
@@ -42,10 +91,10 @@ export interface Artifact {
 export const loadArtifact = (name: 'RegGateStatus' | 'GatedToken'): Artifact =>
 	JSON.parse(readFileSync(join(ROOT, 'deploy', 'artifacts', `${name}.json`), 'utf-8'))
 
-export function rpcUrl(): string {
-	const url = process.env.SEPOLIA_RPC_URL || DEFAULT_RPC
+export function rpcUrl(net: Network = NETWORKS.sepolia): string {
+	const url = process.env[net.rpcEnv] || net.defaultRpc
 	if (!url.startsWith('https://') && !url.startsWith('http://127.0.0.1') && !url.startsWith('http://localhost')) {
-		throw new Error('SEPOLIA_RPC_URL must be https (or localhost for testing)')
+		throw new Error(`${net.rpcEnv} must be https (or localhost for testing)`)
 	}
 	return url
 }
@@ -65,20 +114,22 @@ export function loadAccount() {
 	return privateKeyToAccount(`0x${hex}` as Hex)
 }
 
-export function clients(withWallet: boolean) {
-	const transport = http(rpcUrl())
-	const publicClient = createPublicClient({ chain: sepolia, transport })
+export function clients(withWallet: boolean, net: Network = NETWORKS.sepolia) {
+	const transport = http(rpcUrl(net))
+	const publicClient = createPublicClient({ chain: net.chain, transport })
 	const account = withWallet ? loadAccount() : undefined
-	const walletClient = account ? createWalletClient({ chain: sepolia, transport, account }) : undefined
+	const walletClient = account ? createWalletClient({ chain: net.chain, transport, account }) : undefined
 	return { publicClient, walletClient, account }
 }
 
-export async function assertSepolia(publicClient: ReturnType<typeof createPublicClient>) {
+export async function assertChain(publicClient: { getChainId(): Promise<number> }, net: Network) {
 	const id = await publicClient.getChainId()
-	if (id !== SEPOLIA_CHAIN_ID) {
-		throw new Error(`Refusing to run: RPC reports chain ${id}, expected Sepolia (${SEPOLIA_CHAIN_ID}).`)
+	if (id !== net.chainId) {
+		throw new Error(`Refusing to run: RPC reports chain ${id}, expected ${net.label} (${net.chainId}).`)
 	}
 }
+
+export const assertSepolia = (publicClient: { getChainId(): Promise<number> }) => assertChain(publicClient, NETWORKS.sepolia)
 
 export function parseAddressArg(value: string | undefined, fallback: Address, label: string): Address {
 	if (!value) return fallback
@@ -87,8 +138,10 @@ export function parseAddressArg(value: string | undefined, fallback: Address, la
 	return getAddress(value)
 }
 
+export const deploymentFile = (net: Network) => join(ROOT, 'deploy', 'deployments', `${net.name}.json`)
+
 export interface Deployment {
-	network: 'sepolia'
+	network: Network['name']
 	chainId: number
 	deployedAt: string
 	deployer: Address

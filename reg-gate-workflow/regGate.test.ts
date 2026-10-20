@@ -8,6 +8,7 @@ import {
 	classify,
 	computeWindow,
 	deserializeResult,
+	docToBytes32,
 	encodeReport,
 	type FrDocument,
 	informationalReason,
@@ -18,6 +19,7 @@ import {
 	severityForType,
 	Status,
 	summarize,
+	writeDecision,
 } from './regGate'
 
 const W = { start: '2026-08-01', end: '2026-09-30' }
@@ -441,5 +443,51 @@ describe('serialize and report encoding', () => {
 		expect([...statuses]).toEqual(r.statuses)
 		expect(hexToString(docs[idx('STABLECOINS')] as Hex, { size: 32 })).toBe('2026-16796')
 		expect(docs[idx('AML_SANCTIONS')]).toBe(`0x${'00'.repeat(32)}`)
+	})
+})
+
+describe('writeDecision (heartbeat: skip only when sure nothing changes)', () => {
+	const r = run([REG_CRYPTO, GENIUS]) // STABLECOINS and TOKENIZED REVIEW, MARKETS REVIEW, AML OK
+	const NOW = 1_800_000_000n
+	const H = 3600n
+	const held = (over: Record<string, unknown> = {}) => ({
+		lastAsOf: NOW - 2n * H,
+		maxAge: 7n * 24n * H,
+		statuses: [...r.statuses],
+		triggerDocs: r.triggerDocs.map(docToBytes32),
+		...over,
+	})
+	test('identical status, fresh report: skip', () => {
+		expect(writeDecision(held(), r, NOW, 24n * H)).toEqual({
+			write: false,
+			reason: 'unchanged, last report 7200s old (heartbeat at 86400s)',
+		})
+	})
+	test('document hex compares case-insensitively', () => {
+		const upper = held({ triggerDocs: r.triggerDocs.map((d) => docToBytes32(d).toUpperCase().replace('0X', '0x')) })
+		expect(writeDecision(upper as any, r, NOW, 24n * H).write).toBe(false)
+	})
+	test('unreadable chain, bad shape, or no report yet: write', () => {
+		expect(writeDecision(null, r, NOW, 24n * H)).toEqual({ write: true, reason: 'on-chain read failed' })
+		expect(writeDecision(held({ statuses: [0, 1, 1] }) as any, r, NOW, 24n * H).write).toBe(true)
+		expect(writeDecision(held({ triggerDocs: [] }) as any, r, NOW, 24n * H).write).toBe(true)
+		expect(writeDecision(held({ lastAsOf: 0n }) as any, r, NOW, 24n * H).reason).toBe('no report on-chain yet')
+	})
+	test('any status or document change: write', () => {
+		const st = held()
+		st.statuses[idx('AML_SANCTIONS')] = Status.REVIEW
+		expect(writeDecision(st as any, r, NOW, 24n * H).reason).toBe('AML_SANCTIONS changed')
+		const dc = held()
+		dc.triggerDocs[idx('STABLECOINS')] = docToBytes32('2026-99999')
+		expect(writeDecision(dc as any, r, NOW, 24n * H).reason).toBe('STABLECOINS changed')
+	})
+	test('heartbeat boundary: one second short skips, exactly due writes', () => {
+		expect(writeDecision(held({ lastAsOf: NOW - 24n * H + 1n }) as any, r, NOW, 24n * H).write).toBe(false)
+		expect(writeDecision(held({ lastAsOf: NOW - 24n * H }) as any, r, NOW, 24n * H).write).toBe(true)
+	})
+	test('a heartbeat longer than half of maxAge is capped, so skips can never run a chain stale', () => {
+		const twoDays = held({ maxAge: 48n * H, lastAsOf: NOW - 24n * H })
+		expect(writeDecision(twoDays as any, r, NOW, 168n * H).write).toBe(true)
+		expect(writeDecision(held({ maxAge: 0n }) as any, r, NOW, 24n * H).write).toBe(true)
 	})
 })

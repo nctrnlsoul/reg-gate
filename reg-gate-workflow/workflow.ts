@@ -13,7 +13,10 @@
 //   2. Nodes must return byte-identical results (identical consensus). Any
 //      disagreement fails the run, nothing is written, and the contract's
 //      staleness rule turns that silence into BLOCK.
-//   3. The agreed result is signed into a report and written to RegGateStatus.sol.
+//   3. For each target chain (the primary plus any mirrors), the workflow reads what
+//      RegGateStatus already holds at the last finalized block. If nothing changed and
+//      the heartbeat is not due, it skips the write. Otherwise the agreed result is
+//      signed into a report bound to that chain's ID and written there.
 //
 // Flags regulatory publications for human review. Not legal advice.
 
@@ -25,12 +28,21 @@ import {
 	type EVMLog,
 	getNetwork,
 	type HTTPSendRequester,
+	encodeCallMsg,
+	LAST_FINALIZED_BLOCK_NUMBER,
 	logTriggerConfig,
 	prepareReportRequest,
 	type Runtime,
 	TxStatus,
 } from '@chainlink/cre-sdk'
-import { type Address, type Hex, toEventSelector } from 'viem'
+import {
+	type Address,
+	decodeFunctionResult,
+	encodeFunctionData,
+	type Hex,
+	parseAbi,
+	toEventSelector,
+} from 'viem'
 import { z } from 'zod'
 import {
 	buildEffectiveQueryUrl,
@@ -40,9 +52,12 @@ import {
 	computeWindow,
 	deserializeResult,
 	encodeReport,
+	type GateResult,
+	type OnChainState,
 	parseFederalRegisterResponse,
 	serializeResult,
 	summarize,
+	writeDecision,
 } from './regGate'
 
 const FR_PREFIX = 'https://www.federalregister.gov/api/v1/'
@@ -50,6 +65,24 @@ const FR_PREFIX = 'https://www.federalregister.gov/api/v1/'
 /** RegGateStatus emits this when the reviewer clears a latched BLOCK. */
 export const LATCH_CLEARED_SIGNATURE = 'LatchCleared(uint8,bytes32,address)'
 export const LATCH_CLEARED_TOPIC: Hex = toEventSelector(LATCH_CLEARED_SIGNATURE)
+
+const receiverSchema = z
+	.string()
+	.regex(/^0x[0-9a-fA-F]{40}$/, 'receiverAddress must be a 20-byte hex address')
+	.refine((a) => !/^0x0{40}$/.test(a), 'receiverAddress must not be the zero address')
+const gasLimitSchema = z.string().regex(/^[1-9][0-9]*$/, 'gasLimit must be a positive integer string')
+
+/** Another chain that receives the same status, with its own contract and replay guard. */
+const mirrorSchema = z
+	.object({
+		chainSelectorName: z.string().min(1),
+		isTestnet: z.boolean(),
+		receiverAddress: receiverSchema,
+		gasLimit: gasLimitSchema,
+	})
+	.strict()
+
+export const DEFAULT_HEARTBEAT_HOURS = 24
 
 export const configSchema = z
 	.object({
@@ -59,17 +92,52 @@ export const configSchema = z
 			.refine((u) => u.startsWith(FR_PREFIX), `frBaseUrl must start with ${FR_PREFIX}`),
 		lookbackDays: z.number().int().min(1).max(90),
 		perPage: z.number().int().min(1).max(100),
+		// Primary chain: written every run (unless unchanged) and watched for LatchCleared.
 		chainSelectorName: z.string().min(1),
 		isTestnet: z.boolean(),
-		receiverAddress: z
-			.string()
-			.regex(/^0x[0-9a-fA-F]{40}$/, 'receiverAddress must be a 20-byte hex address')
-			.refine((a) => !/^0x0{40}$/.test(a), 'receiverAddress must not be the zero address'),
-		gasLimit: z.string().regex(/^[1-9][0-9]*$/, 'gasLimit must be a positive integer string'),
+		receiverAddress: receiverSchema,
+		gasLimit: gasLimitSchema,
+		// Rewrite an unchanged status at least this often (capped at half the contract's maxAge).
+		heartbeatHours: z.number().int().min(1).max(168).optional(),
+		mirrors: z.array(mirrorSchema).max(4).optional(),
 	})
 	.strict()
+	.refine(
+		(c) => {
+			const names = [c.chainSelectorName, ...(c.mirrors ?? []).map((m) => m.chainSelectorName)]
+			return new Set(names).size === names.length
+		},
+		{ message: 'each chain may appear only once (primary and mirrors)' },
+	)
 
 export type Config = z.infer<typeof configSchema>
+
+/** One chain the status is written to. */
+export interface Target {
+	chainSelectorName: string
+	isTestnet: boolean
+	receiverAddress: string
+	gasLimit: string
+}
+
+export const targetsOf = (c: Config): Target[] => [
+	{
+		chainSelectorName: c.chainSelectorName,
+		isTestnet: c.isTestnet,
+		receiverAddress: c.receiverAddress,
+		gasLimit: c.gasLimit,
+	},
+	...(c.mirrors ?? []),
+]
+
+// The RegGateStatus views the heartbeat reads. CI checks these against the compiled ABI.
+export const STATUS_READ_ABI = parseAbi([
+	'function lastAsOf() view returns (uint64)',
+	'function maxAge() view returns (uint64)',
+	'function reportedStatus(uint8 category) view returns (uint8 status, bytes32 triggerDoc)',
+])
+// Reads come from the zero address: views need no sender, and nothing is signed.
+const READ_FROM: Address = '0x0000000000000000000000000000000000000000'
 
 type FetchArgs = { url: string; effectiveUrl: string; start: string; end: string }
 
@@ -89,14 +157,97 @@ export const fetchAndClassify = (sendRequester: HTTPSendRequester, args: FetchAr
 	return serializeResult(classify(published, args.start, args.end, takingEffect))
 }
 
-const resolveNetwork = (config: Config) => {
+const resolveNetwork = (t: Pick<Target, 'chainSelectorName' | 'isTestnet'>) => {
 	const network = getNetwork({
 		chainFamily: 'evm',
-		chainSelectorName: config.chainSelectorName,
-		isTestnet: config.isTestnet,
+		chainSelectorName: t.chainSelectorName,
+		isTestnet: t.isTestnet,
 	})
-	if (!network) throw new Error(`Network not found for chain selector name: ${config.chainSelectorName}`)
+	if (!network) throw new Error(`Network not found for chain selector name: ${t.chainSelectorName}`)
 	return network
+}
+
+type EvmClient = InstanceType<typeof cre.capabilities.EVMClient>
+
+/** One view call at the last finalized block. Throws on failure; the caller decides. */
+const readView = <const F extends 'lastAsOf' | 'maxAge' | 'reportedStatus'>(
+	runtime: Runtime<Config>,
+	evm: EvmClient,
+	to: Address,
+	functionName: F,
+	args: readonly unknown[],
+) => {
+	const data = encodeFunctionData({ abi: STATUS_READ_ABI, functionName, args } as any)
+	const reply = evm
+		.callContract(runtime, {
+			call: encodeCallMsg({ from: READ_FROM, to, data }),
+			blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
+		})
+		.result()
+	return decodeFunctionResult({ abi: STATUS_READ_ABI, functionName, data: bytesToHex(reply.data) } as any)
+}
+
+/**
+ * What the contract on this chain holds now. Returns null on ANY failure: the
+ * heartbeat treats an unreadable chain as "write", never as "unchanged".
+ * Finalized, not latest: a report still in an unfinalized block reads as older,
+ * which can only cause an extra write, never a skipped one.
+ */
+export const readOnChain = (runtime: Runtime<Config>, evm: EvmClient, receiver: Address): OnChainState | null => {
+	try {
+		const lastAsOf = readView(runtime, evm, receiver, 'lastAsOf', []) as bigint
+		const maxAge = readView(runtime, evm, receiver, 'maxAge', []) as bigint
+		const statuses: number[] = []
+		const triggerDocs: Hex[] = []
+		for (let i = 0; i < CATEGORIES.length; i++) {
+			const [status, doc] = readView(runtime, evm, receiver, 'reportedStatus', [i]) as readonly [number, Hex]
+			statuses.push(Number(status))
+			triggerDocs.push(doc)
+		}
+		return { lastAsOf, maxAge, statuses, triggerDocs }
+	} catch (e) {
+		runtime.log(`Reg-Gate: on-chain read failed (${(e as Error).message}); will write`)
+		return null
+	}
+}
+
+type ChainOutcome = { chain: string; outcome: 'written' | 'skipped' | 'failed'; detail: string }
+
+/** Read, decide, and (if needed) sign and write one chain's report. Never throws. */
+const deliver = (
+	runtime: Runtime<Config>,
+	target: Target,
+	result: GateResult,
+	asOf: number,
+	heartbeatSeconds: bigint,
+): ChainOutcome => {
+	const chain = target.chainSelectorName
+	try {
+		const network = resolveNetwork(target)
+		const evm = new cre.capabilities.EVMClient(network.chainSelector.selector)
+		const receiver = target.receiverAddress as Address
+
+		const decision = writeDecision(readOnChain(runtime, evm, receiver), result, BigInt(asOf), heartbeatSeconds)
+		if (!decision.write) {
+			runtime.log(`Reg-Gate: ${chain}: ${decision.reason}; no write`)
+			return { chain, outcome: 'skipped', detail: decision.reason }
+		}
+
+		// chainId in the payload binds each report to its own chain (cross-chain replay guard).
+		const report = encodeReport(BigInt(network.chainId), BigInt(asOf), result)
+		const signed = runtime.report(prepareReportRequest(report)).result()
+		const resp = evm
+			.writeReport(runtime, { receiver, report: signed, gasConfig: { gasLimit: target.gasLimit } })
+			.result()
+		if (resp.txStatus !== TxStatus.SUCCESS) {
+			return { chain, outcome: 'failed', detail: resp.errorMessage || String(resp.txStatus) }
+		}
+		const tx = bytesToHex(resp.txHash || new Uint8Array(32))
+		runtime.log(`Reg-Gate: ${chain}: ${decision.reason}; report written, txHash ${tx}`)
+		return { chain, outcome: 'written', detail: tx }
+	} catch (e) {
+		return { chain, outcome: 'failed', detail: (e as Error).message }
+	}
 }
 
 /** The check both triggers run: fetch, classify, agree, sign, write. */
@@ -125,25 +276,17 @@ export const runCheck = (runtime: Runtime<Config>): string => {
 	const result = deserializeResult(agreed)
 	runtime.log(`Reg-Gate: ${summarize(result)}`)
 
-	const network = resolveNetwork(config)
-	const report = encodeReport(BigInt(network.chainId), BigInt(asOf), result)
+	// Same agreed result to every chain. Chains are independent: one failing does not
+	// stop the others, but the run still fails so the miss is visible, and that
+	// chain's own staleness rule turns continued silence into BLOCK.
+	const heartbeatSeconds = BigInt((config.heartbeatHours ?? DEFAULT_HEARTBEAT_HOURS) * 3600)
+	const outcomes = targetsOf(config).map((t) => deliver(runtime, t, result, asOf, heartbeatSeconds))
 
-	const evmClient = new cre.capabilities.EVMClient(network.chainSelector.selector)
-	const signed = runtime.report(prepareReportRequest(report)).result()
-	const resp = evmClient
-		.writeReport(runtime, {
-			receiver: config.receiverAddress as Address,
-			report: signed,
-			gasConfig: { gasLimit: config.gasLimit },
-		})
-		.result()
-
-	if (resp.txStatus !== TxStatus.SUCCESS) {
-		throw new Error(`Failed to write report: ${resp.errorMessage || resp.txStatus}`)
+	const failed = outcomes.filter((o) => o.outcome === 'failed')
+	if (failed.length > 0) {
+		throw new Error(`Failed to write report: ${failed.map((o) => `${o.chain}: ${o.detail}`).join('; ')}`)
 	}
-	runtime.log(`Reg-Gate: report written, txHash ${bytesToHex(resp.txHash || new Uint8Array(32))}`)
-
-	return summarize(result)
+	return `${summarize(result)} | ${outcomes.map((o) => `${o.chain}=${o.outcome}`).join(' ')}`
 }
 
 export const onCronTrigger = (runtime: Runtime<Config>, payload: CronPayload): string => {
@@ -176,7 +319,9 @@ export const onLatchCleared = (runtime: Runtime<Config>, log: EVMLog): string =>
 }
 
 export function initWorkflow(config: Config) {
-	const network = resolveNetwork(config) // fail at startup, not mid-run, on a bad chain name
+	// Fail at startup, not mid-run, on a bad chain name (primary or mirror).
+	for (const t of targetsOf(config)) resolveNetwork(t)
+	const network = resolveNetwork(config)
 	const cron = new cre.capabilities.CronCapability()
 	const evm = new cre.capabilities.EVMClient(network.chainSelector.selector)
 	return [

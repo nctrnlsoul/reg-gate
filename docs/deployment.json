@@ -16,5 +16,15 @@
       "strict": true,
       "address": "0x328c1c98b499485eaa499b3e3747a971a849dad9"
     }
+  ],
+  "mirrors": [
+    {
+      "name": "Base Sepolia",
+      "chainId": 84532,
+      "regGateStatus": "0x03d0df9e8ef2785b241eacca9460a60dd4daa075",
+      "forwarder": "0x82300bd7c3958625581cc2f77bc6464dcecdf3e5",
+      "fromBlock": 48377937,
+      "explorer": "https://sepolia.basescan.org"
+    }
   ]
 }

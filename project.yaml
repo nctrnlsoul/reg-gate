@@ -19,11 +19,15 @@ staging-settings:
   rpcs:
     - chain-name: ethereum-testnet-sepolia
       url: https://ethereum-sepolia-rpc.publicnode.com
+    - chain-name: ethereum-testnet-sepolia-base-1
+      url: https://base-sepolia-rpc.publicnode.com
 
 # ==========================================================================
 production-settings:
   rpcs:
     - chain-name: ethereum-testnet-sepolia
       url: https://ethereum-sepolia-rpc.publicnode.com
+    - chain-name: ethereum-testnet-sepolia-base-1
+      url: https://base-sepolia-rpc.publicnode.com
     - chain-name: ethereum-mainnet
       url: https://ethereum-rpc.publicnode.com

@@ -2,8 +2,15 @@ import { describe, expect } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { newTestRuntime, test } from '@chainlink/cre-sdk/test'
-import { bytesToHex, encodeEventTopics, type Abi } from 'viem'
-import { configSchema, initWorkflow, LATCH_CLEARED_TOPIC, onCronTrigger, onLatchCleared } from './workflow'
+import { bytesToHex, encodeEventTopics, toFunctionSelector, type Abi, type AbiFunction } from 'viem'
+import {
+	configSchema,
+	initWorkflow,
+	LATCH_CLEARED_TOPIC,
+	onCronTrigger,
+	onLatchCleared,
+	STATUS_READ_ABI,
+} from './workflow'
 
 const base = {
 	schedule: '0 0 */6 * * *',
@@ -33,6 +40,29 @@ describe('configSchema (reject bad config before anything runs)', () => {
 		expect(configSchema.safeParse({ ...base, perPage: 500 }).success).toBe(false)
 		expect(configSchema.safeParse({ ...base, gasLimit: '0' }).success).toBe(false)
 		expect(configSchema.safeParse({ ...base, extra: true }).success).toBe(false)
+		expect(configSchema.safeParse({ ...base, heartbeatHours: 0 }).success).toBe(false)
+		expect(configSchema.safeParse({ ...base, heartbeatHours: 169 }).success).toBe(false)
+	})
+	const mirror = {
+		chainSelectorName: 'ethereum-testnet-sepolia-base-1',
+		isTestnet: true,
+		receiverAddress: '0x000000000000000000000000000000000000bA5E',
+		gasLimit: '1000000',
+	}
+	test('accepts a heartbeat and a mirror chain', () => {
+		expect(configSchema.safeParse({ ...base, heartbeatHours: 24, mirrors: [mirror] }).success).toBe(true)
+	})
+	test('rejects a mirror that repeats a chain, or a bad mirror', () => {
+		expect(configSchema.safeParse({ ...base, mirrors: [{ ...mirror, chainSelectorName: base.chainSelectorName }] }).success).toBe(false)
+		expect(configSchema.safeParse({ ...base, mirrors: [mirror, mirror] }).success).toBe(false)
+		expect(configSchema.safeParse({ ...base, mirrors: [{ ...mirror, receiverAddress: `0x${'0'.repeat(40)}` }] }).success).toBe(false)
+		expect(configSchema.safeParse({ ...base, mirrors: [{ ...mirror, extra: 1 }] }).success).toBe(false)
+	})
+	test('the committed configs parse', () => {
+		for (const f of ['config.staging.json', 'config.production.json']) {
+			const cfg = JSON.parse(readFileSync(join(import.meta.dir, f), 'utf-8'))
+			expect(configSchema.safeParse(cfg).success).toBe(true)
+		}
 	})
 })
 
@@ -62,8 +92,17 @@ describe('initWorkflow', () => {
 		const [topic] = encodeEventTopics({ abi: artifact.abi as Abi, eventName: 'LatchCleared' })
 		expect(topic).toBe(LATCH_CLEARED_TOPIC)
 	})
-	test('fails fast on an unknown chain name', () => {
+	test('the heartbeat reads functions the deployed contract actually has', () => {
+		const artifact = JSON.parse(readFileSync(join(import.meta.dir, '../deploy/artifacts/RegGateStatus.json'), 'utf-8'))
+		const compiled = new Set(
+			(artifact.abi as Abi).filter((x): x is AbiFunction => x.type === 'function').map((f) => toFunctionSelector(f)),
+		)
+		for (const f of STATUS_READ_ABI) expect(compiled.has(toFunctionSelector(f))).toBe(true)
+	})
+	test('fails fast on an unknown chain name, primary or mirror', () => {
 		expect(() => initWorkflow({ ...base, chainSelectorName: 'not-a-chain' })).toThrow('Network not found')
+		const badMirror = { chainSelectorName: 'not-a-chain', isTestnet: true, receiverAddress: base.receiverAddress, gasLimit: '1' }
+		expect(() => initWorkflow({ ...base, mirrors: [badMirror] })).toThrow('Network not found')
 	})
 })
 
