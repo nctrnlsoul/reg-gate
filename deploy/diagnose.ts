@@ -57,16 +57,18 @@ try {
 	const payload = `0x${raw.slice(109 * 2)}` as Hex
 	console.log(`metadata owner: 0x${raw.slice(87 * 2, 107 * 2)}`)
 	try {
-		const [chainId, asOf, statuses, docs] = decodeAbiParameters(
-			[{ type: 'uint256' }, { type: 'uint64' }, { type: 'uint8[4]' }, { type: 'bytes32[4]' }],
+		const [chainId, asOf, statuses, docs, blockDocs, blockCats] = decodeAbiParameters(
+			[{ type: 'uint256' }, { type: 'uint64' }, { type: 'uint8[4]' }, { type: 'bytes32[4]' }, { type: 'bytes32[]' }, { type: 'uint8[]' }],
 			payload,
 		)
 		const block = await publicClient.getBlock({ blockNumber: receipt.blockNumber })
 		console.log(`payload: chainId=${chainId} asOf=${asOf} (${new Date(Number(asOf) * 1000).toISOString()}) blockTime=${block.timestamp} (${new Date(Number(block.timestamp) * 1000).toISOString()})`)
 		console.log(`payload statuses: ${[...statuses].map((s) => STATUS[Number(s)]).join(',')}`)
-		console.log(`payload docs: ${[...docs].map((d) => Buffer.from(d.slice(2), 'hex').toString().replace(/\0+$/, '') || '-').join(',')}`)
+		const name = (d: string) => Buffer.from(d.slice(2), 'hex').toString().replace(/\0+$/, '') || '-'
+		console.log(`payload docs: ${[...docs].map(name).join(',')}`)
+		console.log(`payload blocking docs: ${blockDocs.length ? blockDocs.map((d, i) => `${name(d)} (category ${blockCats[i]})`).join(', ') : 'none'}`)
 	} catch (e: any) {
-		console.log(`payload did not decode as (uint256,uint64,uint8[4],bytes32[4]): ${e.shortMessage ?? e.message}`)
+		console.log(`payload did not decode as (uint256,uint64,uint8[4],bytes32[4],bytes32[],uint8[]): ${e.shortMessage ?? e.message}`)
 	}
 	try {
 		await publicClient.call({

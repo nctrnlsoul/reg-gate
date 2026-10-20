@@ -31,10 +31,10 @@ for (let i = 0; i < CATEGORIES.length; i++) {
 		functionName: 'reportedStatus',
 		args: [i],
 	})) as [number, `0x${string}`]
-	const [latched] = (await publicClient.readContract({ address: gate, abi: gateAbi, functionName: 'latchInfo', args: [i] })) as [boolean]
+	const [latched, , unreviewed] = (await publicClient.readContract({ address: gate, abi: gateAbi, functionName: 'latchInfo', args: [i] })) as [boolean, string, bigint]
 	const docNum = Buffer.from(doc.slice(2), 'hex').toString('utf-8').replace(/\0+$/, '')
 	console.log(
-		`  ${CATEGORIES[i].padEnd(22)} ${STATUS[eff].padEnd(6)}${latched ? ' (latched)' : ''}${docNum ? `  ${docNum}` : ''}${lastAsOf && eff !== Number(reported) ? `  [reported ${STATUS[Number(reported)]}]` : ''}`,
+		`  ${CATEGORIES[i].padEnd(22)} ${STATUS[eff].padEnd(6)}${latched ? ` (latched, ${unreviewed} unreviewed)` : ''}${docNum ? `  ${docNum}` : ''}${lastAsOf && eff !== Number(reported) ? `  [reported ${STATUS[Number(reported)]}]` : ''}`,
 	)
 }
 

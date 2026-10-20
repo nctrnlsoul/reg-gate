@@ -148,6 +148,8 @@ export interface Deployment {
 	forwarder: Address
 	maxAgeSeconds: number
 	reviewer: Address
+	simulation: boolean // true only behind the CRE simulation forwarder (demo)
+	expectedAuthor: Address // zero only in simulation mode
 	regGateStatus: { address: Address; tx: Hex }
 	tokens: { symbol: string; category: string; strict: boolean; address: Address; tx: Hex }[]
 }

@@ -11,35 +11,55 @@ const ZERO32 = `0x${'00'.repeat(32)}` as Hex
 /** A Federal Register document number as the contract stores it. '' is all zeros. */
 export const docToBytes32 = (d: string): Hex => (d === '' ? ZERO32 : stringToHex(d, { size: 32 }))
 
-/**
- * ABI payload for RegGateStatus.sol:
- *   (uint256 chainId, uint64 asOf, uint8[4] statuses, bytes32[4] triggerDocs)
- * chainId and asOf defend against cross-chain and same-chain replay.
- */
-export function encodeReport(chainId: bigint, asOf: bigint, r: GateResult): Hex {
-	const docs = r.triggerDocs.map(docToBytes32)
-	return encodeAbiParameters(
-		[
-			{ type: 'uint256' },
-			{ type: 'uint64' },
-			{ type: 'uint8[4]' },
-			{ type: 'bytes32[4]' },
-		],
-		[
-			chainId,
-			asOf,
-			r.statuses as unknown as readonly [number, number, number, number],
-			docs as unknown as readonly [Hex, Hex, Hex, Hex],
-		],
-	)
+/** Every blocking document, flattened in category order, as the contract stores it. */
+export function flattenBlockDocs(r: GateResult): { docs: Hex[]; cats: number[] } {
+	const docs: Hex[] = []
+	const cats: number[] = []
+	r.blockDocs.forEach((list, i) => {
+		for (const d of list) {
+			docs.push(docToBytes32(d))
+			cats.push(i)
+		}
+	})
+	return { docs, cats }
 }
 
-/** What a chain's RegGateStatus holds, read at its last finalized block. */
+export const REPORT_PARAMS = [
+	{ type: 'uint256' },
+	{ type: 'uint64' },
+	{ type: 'uint8[4]' },
+	{ type: 'bytes32[4]' },
+	{ type: 'bytes32[]' },
+	{ type: 'uint8[]' },
+] as const
+
+/**
+ * ABI payload for RegGateStatus.sol:
+ *   (uint256 chainId, uint64 asOf, uint8[4] statuses, bytes32[4] triggerDocs,
+ *    bytes32[] blockDocs, uint8[] blockCategories)
+ * chainId and asOf defend against cross-chain and same-chain replay. blockDocs lists
+ * every document at BLOCK, so the contract can require a human review of each one.
+ */
+export function encodeReport(chainId: bigint, asOf: bigint, r: GateResult): Hex {
+	const { docs, cats } = flattenBlockDocs(r)
+	return encodeAbiParameters(REPORT_PARAMS, [
+		chainId,
+		asOf,
+		r.statuses as unknown as readonly [number, number, number, number],
+		r.triggerDocs.map(docToBytes32) as unknown as readonly [Hex, Hex, Hex, Hex],
+		docs,
+		cats,
+	])
+}
+
+/** What a chain's RegGateStatus holds (its snapshot() view) at one block. */
 export interface OnChainState {
 	lastAsOf: bigint
 	maxAge: bigint
 	statuses: number[] // raw reported statuses, index matches CATEGORIES
 	triggerDocs: Hex[] // bytes32, index matches CATEGORIES
+	blockDocs: Hex[] // every listed blocking document, in category order
+	blockCats: number[]
 }
 
 export interface WriteDecision {
@@ -54,7 +74,7 @@ export interface WriteDecision {
  *
  *   - read failed or returned a bad shape         -> write
  *   - no report on-chain yet                      -> write
- *   - any status or trigger document differs      -> write
+ *   - any status, trigger or blocking document differs -> write
  *   - last report is at least min(heartbeat, maxAge / 2) old -> write
  *   - otherwise                                   -> skip
  *
@@ -77,6 +97,14 @@ export function writeDecision(
 		if (onChain.statuses[i] !== r.statuses[i] || onChain.triggerDocs[i].toLowerCase() !== docToBytes32(r.triggerDocs[i])) {
 			return { write: true, reason: `${CATEGORIES[i]} changed` }
 		}
+	}
+	const want = flattenBlockDocs(r)
+	if (
+		onChain.blockDocs.length !== want.docs.length ||
+		onChain.blockCats.length !== want.cats.length ||
+		want.docs.some((d, j) => onChain.blockDocs[j].toLowerCase() !== d || onChain.blockCats[j] !== want.cats[j])
+	) {
+		return { write: true, reason: 'blocking documents changed' }
 	}
 	const halfMaxAge = onChain.maxAge / 2n
 	const limit = heartbeatSeconds < halfMaxAge ? heartbeatSeconds : halfMaxAge

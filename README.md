@@ -6,11 +6,11 @@
 U.S. Federal Register publications, sorts them into four asset categories, and writes a
 fail-closed status on-chain. Token contracts check it before every transfer.
 
-- **Live status page:** https://nctrnlsoul.github.io/reg-gate/ (live statuses on both chains, a transfer simulator, and a "why this status" trail computed by the same classifier the DON runs)
+- **Live status page:** https://nctrnlsoul.github.io/reg-gate/
 - **Contract on Sepolia:** [`0x03d0…a075`](https://sepolia.etherscan.io/address/0x03d0df9e8ef2785b241eacca9460a60dd4daa075) (full record in [`deploy/deployments/sepolia.json`](deploy/deployments/sepolia.json))
 - **Contracts verified on Etherscan:** RegGateStatus, gUSD and gAST (source, ABI, Read Contract)
 - **Two chains:** the same agreed status on Ethereum Sepolia and Base Sepolia, each report bound to its own chain
-- **Verification:** 103 workflow tests, 33 contract tests, every planted bug caught (details below)
+- **Verification:** 96 workflow tests, 33 contract tests, every planted bug caught (details below)
 
 > Reg-Gate flags regulatory publications for human review. It is not legal advice and
 > does not interpret the law.
@@ -126,32 +126,9 @@ Every flagged document is checked by hand. That review has changed the rules twi
 | First broadcast, **rejected** (`FutureReport`, forwarder `result=false`) | [`0x7cc3…de65`](https://sepolia.etherscan.io/tx/0x7cc3b7864da41343b7e72fd9ecb58c4e20d02ac46925b4a5277e2c4aa4efde65) |
 | Second broadcast, **accepted** (2026-10-19) | [`0x205d…bb0d`](https://sepolia.etherscan.io/tx/0x205ddf1792e113a3a3d8ffed037cf0c86e1ca3032f4da621346f564035adbb0d) |
 | Effective-date gate, **accepted** (2026-10-20) | [`0x0c1c…74f6`](https://sepolia.etherscan.io/tx/0x0c1c93d22bd217949945cf6a2541d862e509df6fec4fb0998eca3b85b4d174f6) |
-| RegGateStatus, **Base Sepolia mirror** | [`0x03d0df9e8ef2785b241eacca9460a60dd4daa075`](https://sepolia.basescan.org/address/0x03d0df9e8ef2785b241eacca9460a60dd4daa075) |
-| First mirror broadcast, **accepted** (2026-10-20) | [`0x9cb2…dc98`](https://sepolia.basescan.org/tx/0x9cb2daea1a1ff3eae8ca1bd5009d693fce7209c93d74cdc049acaa1bcd23dc98) |
-
-The mirror has the same address as the Sepolia contract because it was the deployer's first
-transaction on Base Sepolia too (same deployer, same nonce). It is a separate contract on a
-separate chain, and a Sepolia report replayed there is rejected by its chain ID check.
-
-That mirror broadcast shows both halves of the heartbeat on live chains, in one run:
-- **Sepolia: skipped.** The workflow read the contract at the last finalized block, found
-  every status and document unchanged and the last report 38 minutes old, and wrote nothing.
-- **Base Sepolia: written.** The contract was minutes old, so it did not exist yet at the
-  last finalized block and the read came back empty. The workflow treated the failed read as
-  "changed" and wrote, exactly as the fail-closed rule says.
 
 All three contracts are verified on Etherscan. Check the live state yourself with
 `bun deploy/status.ts` (read-only, no key, no gas).
-
-## Why this status
-
-The status page explains every category with `explain()` from
-[`rules.ts`](reg-gate-workflow/rules.ts), built to `docs/rules.js`. It is the classifier the
-DON runs, not a copy: the page fetches the trigger document, runs it through the same strict
-parser and rules, and shows the agency check, the exact text that matched, the exclusions, the
-severity, and what the contract enforces. A test holds `explain()` to `classify()` across
-every fixture, and CI fails if `docs/rules.js` drifts from a fresh build. The page only
-explains: every status it shows is read from the contract.
 
 ## Fail-closed design
 
@@ -186,12 +163,10 @@ replay and same-chain replay of a failed report.
 
 ```
 reg-gate-workflow/
-  rules.ts              classifier, parser, query builder, explain() (pure, no imports)
-  regGate.ts            heartbeat rule and report encoder (viem); re-exports rules.ts
-  build-page.ts         builds docs/rules.js from rules.ts for the status page
+  regGate.ts            classifier, parser, query builder, heartbeat rule, report encoder (pure)
   workflow.ts           CRE wiring: cron or LatchCleared -> fetch -> consensus -> per chain: read -> write
-  regGate.test.ts       65 classifier, explain and heartbeat tests
-  workflow.test.ts      14 config, trigger-wiring, ABI and page-build cross-checks
+  regGate.test.ts       59 classifier and heartbeat tests
+  workflow.test.ts      13 config, trigger-wiring and ABI cross-check tests
   e2e.test.ts           24 end-to-end tests: real handlers for both triggers, mocked HTTP and two chains
 contracts/
   src/RegGateStatus.sol    on-chain receiver
@@ -202,10 +177,8 @@ deploy/
   status.ts       read the live status and simulate a transfer on each token (no key, no gas)
   address.ts      print the burner's public address for a faucet
 docs/
-  index.html      live status page (GitHub Pages): statuses on both chains, the Federal Register
-                  documents behind them, a "why" trail per category, a transfer simulator
-                  (eth_call), the Solidity to gate a token, and the on-chain event log
-  rules.js        generated from rules.ts; CI fails if it differs from a fresh build
+  index.html      live status page (GitHub Pages): statuses, the Federal Register documents
+                  behind them, why each token is open or blocked, and the on-chain event log
 ```
 
 ## Run it
@@ -265,9 +238,9 @@ and a 7-day `maxAge` so the status page stays readable between runs.
 
 | Suite | Tests | Planted bugs caught |
 |---|---|---|
-| Classifier, explain and heartbeat rule (`regGate.test.ts`) | 65 | 37 of 37 |
+| Classifier and heartbeat rule (`regGate.test.ts`) | 59 | 31 of 31 |
 | Workflow end to end (`e2e.test.ts`) | 24 | 13 of 13 |
-| Config, trigger wiring, ABI and page-build cross-checks (`workflow.test.ts`) | 14 | 2 of 2 |
+| Config, trigger wiring, ABI cross-checks (`workflow.test.ts`) | 13 | 2 of 2 |
 | LatchCleared trigger (handler + wiring) | in the two rows above | 8 of 8 |
 | RegGateStatus | 24 | 12 of 12 |
 | GatedToken | 9 | 7 of 7 |
@@ -304,10 +277,6 @@ Also verified by hand on 2026-10-20:
 - The Base Sepolia deploy path on a local chain with Base Sepolia's chain ID: deploys, adds
   the mirror to both configs, keeps the Sepolia record intact, and refuses an RPC that
   reports the wrong chain.
-- The status page against local chains with Sepolia's and Base Sepolia's chain IDs and a
-  live-shaped report: the "why" trails, the simulator (blocked, allowed, insufficient
-  balance, invalid input), the two-chain view, at desktop and 390px widths, with no console
-  errors and no horizontal overflow.
 
 ## License
 

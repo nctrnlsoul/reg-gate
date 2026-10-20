@@ -21,7 +21,8 @@ var WATCHED_AGENCIES = new Set([
   "foreign-assets-control-office",
   "consumer-financial-protection-bureau",
   "internal-revenue-service",
-  "executive-office-of-the-president"
+  "executive-office-of-the-president",
+  "national-credit-union-administration"
 ]);
 var AML_AGENCIES = new Set(["financial-crimes-enforcement-network", "foreign-assets-control-office"]);
 var STABLECOIN_TERMS = [/\bstablecoins?\b/, /\bgenius act\b/];
@@ -67,6 +68,10 @@ var FIELDS = [
 ];
 var SRO_TITLE = /^self-regulatory organizations;/;
 var WITHDRAWAL_TITLE = /;\s*withdrawal\.?$/;
+var FINRA = /\bfinancial industry regulatory authority\b/;
+var RELIEF = /\bexempt(ion|ions|ive)?\b|\brelief\b/;
+var MAX_BLOCK_DOCS = 16;
+var EFFECTIVE_HORIZON_DAYS = 366;
 var anyMatch = (patterns, text) => patterns.some((p) => p.test(text));
 var isNonEmptyString = (v) => typeof v === "string" && v.length > 0;
 var DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -152,10 +157,10 @@ function severityFor(doc, asOfDate) {
 function informationalReason(doc) {
   const title = doc.title.trim().toLowerCase();
   const type = normType(doc);
-  if (type === "notice" && doc.agencySlugs.length > 0 && doc.agencySlugs.every((s) => s === SEC) && SRO_TITLE.test(title)) {
+  if (type === "notice" && doc.agencySlugs.length > 0 && doc.agencySlugs.every((s) => s === SEC) && SRO_TITLE.test(title) && !FINRA.test(title)) {
     return "sro-filing";
   }
-  if (type === "proposed rule" && WITHDRAWAL_TITLE.test(title))
+  if (type === "proposed rule" && WITHDRAWAL_TITLE.test(title) && !RELIEF.test(title))
     return "withdrawn-proposal";
   return null;
 }
@@ -259,11 +264,22 @@ function explain(doc, asOfDate) {
     return { ...base, outcome: "informational", evidence, categories, informational: info };
   return { ...base, outcome: "matched", evidence, categories, severity: severityFor(doc, asOfDate) };
 }
-var moreRecent = (a, b) => a.publicationDate !== b.publicationDate ? a.publicationDate > b.publicationDate : a.documentNumber > b.documentNumber;
+function eventDate(doc, asOfDate) {
+  if (normType(doc) === "rule" && doc.effectiveOn !== "" && doc.effectiveOn <= asOfDate && doc.effectiveOn > doc.publicationDate) {
+    return doc.effectiveOn;
+  }
+  return doc.publicationDate;
+}
+var moreRecent = (a, b, asOfDate) => {
+  const ea = eventDate(a, asOfDate);
+  const eb = eventDate(b, asOfDate);
+  return ea !== eb ? ea > eb : a.documentNumber > b.documentNumber;
+};
 var EMPTY = { count: 0, documents: [] };
-function classify(published, windowStart, windowEnd, takingEffect = EMPTY) {
+function classify(published, windowStart, windowEnd, takingEffect = EMPTY, asOfDate = windowEnd, horizon = asOfDate) {
   const statuses = CATEGORIES.map(() => Status.OK);
   const triggers = CATEGORIES.map(() => null);
+  const blocking = CATEGORIES.map(() => []);
   let matched = 0;
   let ignored = 0;
   let informational = 0;
@@ -276,7 +292,7 @@ function classify(published, windowStart, windowEnd, takingEffect = EMPTY) {
     if (normType(doc) !== "rule") {
       throw new Error(`FR document ${doc.documentNumber} from the effective-date query is not a final rule`);
     }
-    if (doc.effectiveOn === "" || doc.effectiveOn < windowStart || doc.effectiveOn > windowEnd) {
+    if (doc.effectiveOn === "" || doc.effectiveOn < windowStart || doc.effectiveOn > horizon) {
       throw new Error(`FR document ${doc.documentNumber} does not take effect in the requested window`);
     }
   }
@@ -303,28 +319,35 @@ function classify(published, windowStart, windowEnd, takingEffect = EMPTY) {
       continue;
     }
     matched++;
-    const sev = severityFor(doc, windowEnd);
+    const sev = severityFor(doc, asOfDate);
     for (const cat of cats) {
       const i = CATEGORIES.indexOf(cat);
       const current = triggers[i];
-      if (sev > statuses[i] || sev === statuses[i] && current !== null && moreRecent(doc, current)) {
+      if (sev > statuses[i] || sev === statuses[i] && current !== null && moreRecent(doc, current, asOfDate)) {
         statuses[i] = sev;
         triggers[i] = doc;
       }
+      if (sev === Status.BLOCK)
+        blocking[i].push(doc);
     }
+  }
+  const blockDocs = blocking.map((list) => list.slice().sort((a, b) => moreRecent(a, b, asOfDate) ? -1 : moreRecent(b, a, asOfDate) ? 1 : 0).map((d) => d.documentNumber));
+  const total = blockDocs.reduce((n, l) => n + l.length, 0);
+  if (total > MAX_BLOCK_DOCS) {
+    throw new Error(`${total} blocking documents exceed the report cap of ${MAX_BLOCK_DOCS}`);
   }
   const truncated = published.count > published.documents.length || takingEffect.count > takingEffect.documents.length;
   if (truncated) {
-    for (let i = 0;i < statuses.length; i++) {
-      if (statuses[i] < Status.REVIEW)
-        statuses[i] = Status.REVIEW;
-    }
+    for (let i = 0;i < statuses.length; i++)
+      statuses[i] = Status.BLOCK;
   }
   return {
     windowStart,
     windowEnd,
+    asOfDate,
     statuses,
     triggerDocs: triggers.map((d) => d ? d.documentNumber : ""),
+    blockDocs,
     matched,
     ignored,
     informational,
@@ -342,7 +365,12 @@ function computeWindow(scheduledUnixSeconds, lookbackDays) {
   }
   const dayStart = Math.floor(scheduledUnixSeconds * 1000 / DAY_MS) * DAY_MS;
   const endMs = dayStart - DAY_MS;
-  return { start: isoDate(endMs - (lookbackDays - 1) * DAY_MS), end: isoDate(endMs) };
+  return {
+    start: isoDate(endMs - (lookbackDays - 1) * DAY_MS),
+    end: isoDate(endMs),
+    today: isoDate(dayStart),
+    horizon: isoDate(dayStart + EFFECTIVE_HORIZON_DAYS * DAY_MS)
+  };
 }
 function queryUrl(baseUrl, perPage, conditions) {
   if (!baseUrl.startsWith("https://"))
@@ -369,15 +397,17 @@ function buildEffectiveQueryUrl(baseUrl, window, perPage) {
   return queryUrl(baseUrl, perPage, [
     `${enc("conditions[type][]")}=RULE`,
     `${enc("conditions[effective_date][gte]")}=${window.start}`,
-    `${enc("conditions[effective_date][lte]")}=${window.end}`
+    `${enc("conditions[effective_date][lte]")}=${window.horizon}`
   ]);
 }
 function serializeResult(r) {
   return JSON.stringify({
     windowStart: r.windowStart,
     windowEnd: r.windowEnd,
+    asOfDate: r.asOfDate,
     statuses: r.statuses,
     triggerDocs: r.triggerDocs,
+    blockDocs: r.blockDocs,
     matched: r.matched,
     ignored: r.ignored,
     informational: r.informational,
@@ -396,15 +426,31 @@ function deserializeResult(s) {
     if (!Number.isInteger(r[k]) || r[k] < 0)
       throw new Error(`bad ${k}`);
   }
+  if (!Array.isArray(r.blockDocs) || r.blockDocs.length !== CATEGORIES.length)
+    throw new Error("bad blockDocs");
+  let total = 0;
+  r.blockDocs.forEach((list, i) => {
+    if (!Array.isArray(list) || !list.every((d) => typeof d === "string" && d.length > 0 && d.length <= 32)) {
+      throw new Error("bad blockDocs entry");
+    }
+    if (list.length > 0 && r.statuses[i] !== Status.BLOCK)
+      throw new Error("blockDocs on a category not at BLOCK");
+    total += list.length;
+  });
+  if (total > MAX_BLOCK_DOCS)
+    throw new Error("too many blockDocs");
   return r;
 }
 function summarize(r) {
   const lines = CATEGORIES.map((c, i) => `${c}=${STATUS_NAMES[r.statuses[i]]}${r.triggerDocs[i] ? ` (${r.triggerDocs[i]})` : ""}`);
-  return `window ${r.windowStart}..${r.windowEnd} matched=${r.matched} ignored=${r.ignored} informational=${r.informational} truncated=${r.truncated} | ${lines.join(" ")}`;
+  const blocking = r.blockDocs.reduce((n, l) => n + l.length, 0);
+  return `window ${r.windowStart}..${r.windowEnd} asOf=${r.asOfDate} blocking=${blocking} matched=${r.matched} ignored=${r.ignored} informational=${r.informational} truncated=${r.truncated} | ${lines.join(" ")}`;
 }
 export {
   CATEGORIES,
+  EFFECTIVE_HORIZON_DAYS,
   FIELDS,
+  MAX_BLOCK_DOCS,
   SEARCH_TERM,
   STATUS_NAMES,
   Status,
@@ -415,6 +461,7 @@ export {
   classify,
   computeWindow,
   deserializeResult,
+  eventDate,
   explain,
   informationalReason,
   isOutOfScope,

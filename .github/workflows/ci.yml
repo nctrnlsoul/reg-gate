@@ -46,7 +46,15 @@ jobs:
           persist-credentials: false
       - uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
         with:
-          version: stable
+          version: v1.5.1
       - run: forge --version
       - run: forge build --sizes
       - run: forge test -vv
+      # The workflow tests and the deploy scripts use deploy/artifacts. Fail if they drift
+      # from what this source compiles to, so a contract change cannot ship with stale ABI.
+      - name: Deploy artifacts match a fresh build
+        run: |
+          for c in RegGateStatus GatedToken; do
+            diff <(jq -r .bytecode.object "out/$c.sol/$c.json") <(jq -r .bytecode "../deploy/artifacts/$c.json")
+            diff <(jq -cS .abi "out/$c.sol/$c.json") <(jq -cS .abi "../deploy/artifacts/$c.json")
+          done

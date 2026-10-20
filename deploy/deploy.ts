@@ -13,7 +13,7 @@
 //
 //   bun deploy/deploy.ts                          # Sepolia, simulation forwarder
 //   bun deploy/deploy.ts --network base-sepolia   # Base Sepolia mirror
-//   bun deploy/deploy.ts --forwarder 0x...        # another forwarder
+//   bun deploy/deploy.ts --forwarder 0x... --author 0x...   # production forwarder: author required
 //   bun deploy/deploy.ts --max-age-days 7
 //
 // Testnets only. Key comes from .env and is never printed.
@@ -40,6 +40,7 @@ const { values } = parseArgs({
 		forwarder: { type: 'string' },
 		'max-age-days': { type: 'string', default: '7' },
 		reviewer: { type: 'string' },
+		author: { type: 'string' },
 	},
 })
 
@@ -58,6 +59,14 @@ await assertChain(publicClient, net)
 const deployer = account!.address
 const forwarder = parseAddressArg(values.forwarder, net.simForwarder, '--forwarder')
 const reviewer = parseAddressArg(values.reviewer, deployer, '--reviewer')
+// Simulation mode only behind the CRE simulation forwarder, which checks no DON signatures.
+// Any other forwarder is treated as production, and production requires a pinned author.
+const simulation = forwarder.toLowerCase() === net.simForwarder.toLowerCase()
+const ZERO: Address = '0x0000000000000000000000000000000000000000'
+const author = values.author ? parseAddressArg(values.author, ZERO, '--author') : ZERO
+if (!simulation && author === ZERO) {
+	throw new Error('A production forwarder needs --author <workflow owner address>. The contract refuses every report until one is pinned.')
+}
 
 const balance = await publicClient.getBalance({ address: deployer })
 console.log(`Network:   ${net.label} (${net.chainId})${isMirror ? ', mirror' : ''}`)
@@ -65,6 +74,8 @@ console.log(`Deployer:  ${deployer}`)
 console.log(`Balance:   ${formatEther(balance)} ${net.label} ETH`)
 console.log(`Forwarder: ${forwarder}${forwarder === net.simForwarder ? ' (simulation forwarder)' : ''}`)
 console.log(`Reviewer:  ${reviewer}`)
+console.log(`Mode:      ${simulation ? 'simulation (anyone who can reach the simulation forwarder can write; demo only)' : 'production'}`)
+console.log(`Author:    ${author === ZERO ? 'not pinned (simulation)' : author}`)
 console.log(`Max age:   ${maxAgeDays} days\n`)
 if (balance < parseEther('0.005')) {
 	throw new Error(
@@ -83,7 +94,7 @@ async function deploy(name: 'RegGateStatus' | 'GatedToken', args: unknown[]) {
 }
 
 console.log('Deploying RegGateStatus...')
-const gate = await deploy('RegGateStatus', [forwarder, BigInt(maxAge), reviewer])
+const gate = await deploy('RegGateStatus', [forwarder, BigInt(maxAge), reviewer, author, simulation])
 
 const tokens: Deployment['tokens'] = []
 if (!isMirror) {
@@ -105,6 +116,8 @@ const deployment: Deployment = {
 	forwarder,
 	maxAgeSeconds: maxAge,
 	reviewer,
+	simulation,
+	expectedAuthor: author,
 	regGateStatus: { address: gate.address, tx: gate.tx },
 	tokens,
 }

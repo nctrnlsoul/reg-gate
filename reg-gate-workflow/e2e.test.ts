@@ -16,7 +16,7 @@ import {
 	toHex,
 	type Hex,
 } from 'viem'
-import { CATEGORIES, docToBytes32, type OnChainState, Status } from './regGate'
+import { CATEGORIES, docToBytes32, type OnChainState, REPORT_PARAMS, Status } from './regGate'
 import { type Config, LATCH_CLEARED_TOPIC, onCronTrigger, onLatchCleared, STATUS_READ_ABI } from './workflow'
 
 const config: Config = {
@@ -114,11 +114,7 @@ function wire(http: HttpReply, effective: HttpReply = NOTHING_TAKES_EFFECT) {
 	return seen
 }
 
-const decode = (payloadHex: Hex) =>
-	decodeAbiParameters(
-		[{ type: 'uint256' }, { type: 'uint64' }, { type: 'uint8[4]' }, { type: 'bytes32[4]' }],
-		payloadHex,
-	)
+const decode = (payloadHex: Hex) => decodeAbiParameters(REPORT_PARAMS, payloadHex)
 
 describe('onCronTrigger end to end', () => {
 	test('live-shaped data produces the expected on-chain report', () => {
@@ -128,14 +124,14 @@ describe('onCronTrigger end to end', () => {
 		const summary = onCronTrigger(runtime as any, payload)
 
 		// Two queries over the same window, over https, on the Federal Register only:
-		// published in the window, and final rules taking effect in the window.
+		// published in the window, and final rules taking effect from the window start to a year ahead.
 		expect(seen.urls).toHaveLength(2)
 		for (const u of seen.urls) expect(u.startsWith(config.frBaseUrl)).toBe(true)
 		expect(seen.urls[0]).toContain('conditions%5Bpublication_date%5D%5Bgte%5D=2026-10-05')
 		expect(seen.urls[0]).toContain('conditions%5Bpublication_date%5D%5Blte%5D=2026-10-18')
 		expect(seen.urls[1]).toContain('conditions%5Btype%5D%5B%5D=RULE')
 		expect(seen.urls[1]).toContain('conditions%5Beffective_date%5D%5Bgte%5D=2026-10-05')
-		expect(seen.urls[1]).toContain('conditions%5Beffective_date%5D%5Blte%5D=2026-10-18')
+		expect(seen.urls[1]).toContain('conditions%5Beffective_date%5D%5Blte%5D=2027-10-20') // pending rules up to a year ahead
 
 		// Wrote exactly one report, to the configured receiver.
 		expect(seen.writes).toHaveLength(1)
@@ -172,9 +168,12 @@ describe('onCronTrigger end to end', () => {
 		const seen = wire({ status: 200, body: JSON.stringify(LIVE_RESULTS) }, { status: 200, body: JSON.stringify(takingEffect) })
 		const runtime = newTestRuntime(null, donTime, config)
 		onCronTrigger(runtime as any, payload)
-		const [, , statuses, docs] = decode(seen.writes[0].payload)
+		const [, , statuses, docs, blockDocs, blockCats] = decode(seen.writes[0].payload)
 		expect(statuses[idx('STABLECOINS')]).toBe(Status.BLOCK)
 		expect(hexToString(docs[idx('STABLECOINS')] as Hex, { size: 32 })).toBe('2026-15000')
+		// The blocking document is listed on-chain, so the contract can demand a human review of it.
+		expect(blockDocs.map((d) => hexToString(d as Hex, { size: 32 }))).toEqual(['2026-15000'])
+		expect([...blockCats]).toEqual([idx('STABLECOINS')])
 	})
 
 	test('the effective-date query failing writes nothing (no half picture)', () => {
@@ -340,24 +339,25 @@ const LIVE_ON_CHAIN = (lastAsOf: bigint): OnChainState => ({
 	maxAge: 7n * 86_400n,
 	statuses: [Status.OK, Status.REVIEW, Status.REVIEW, Status.OK],
 	triggerDocs: ['', '2026-20466', '2026-20888', ''].map(docToBytes32),
+	blockDocs: [],
+	blockCats: [],
 })
 
-/** Serve the contract's views on one chain from `state`; 'fail' makes every read error. */
-function onChain(selector: bigint, state: OnChainState | 'fail') {
+/**
+ * Serve snapshot() on one chain. `latest` answers latest-block reads; `finalized`
+ * (default: the same state) answers finalized-block reads. 'fail' makes the read error.
+ */
+function onChain(selector: bigint, latest: OnChainState | 'fail', finalized: OnChainState | 'fail' = latest) {
 	const reads: { fn: string; finalized: boolean }[] = []
 	const mock = EvmMock.testInstance(selector)
 	mock.callContract = (req) => {
-		const data = bytesToHex(req.call!.data)
-		const { functionName, args } = decodeFunctionData({ abi: STATUS_READ_ABI, data })
+		const { functionName } = decodeFunctionData({ abi: STATUS_READ_ABI, data: bytesToHex(req.call!.data) })
 		// LAST_FINALIZED_BLOCK_NUMBER is encoded as block -3.
-		reads.push({ fn: functionName, finalized: req.blockNumber !== undefined && protoBigIntToBigint(req.blockNumber) === -3n })
-		if (state === 'fail') throw new Error('rpc unavailable')
-		const result =
-			functionName === 'lastAsOf'
-				? state.lastAsOf
-				: functionName === 'maxAge'
-					? state.maxAge
-					: [state.statuses[Number(args![0])], state.triggerDocs[Number(args![0])]]
+		const isFinal = req.blockNumber !== undefined && protoBigIntToBigint(req.blockNumber) === -3n
+		reads.push({ fn: functionName, finalized: isFinal })
+		const st = isFinal ? finalized : latest
+		if (st === 'fail') throw new Error('rpc unavailable')
+		const result = [st.lastAsOf, st.maxAge, st.statuses, st.triggerDocs, st.blockDocs, st.blockCats]
 		return { data: hexToBytes(encodeFunctionResult({ abi: STATUS_READ_ABI, functionName, result } as any)) }
 	}
 	return reads
@@ -388,8 +388,8 @@ describe('heartbeat: read the chain first, write only when it matters', () => {
 		const summary = onCronTrigger(newTestRuntime(null, donTime, config) as any, payload)
 		expect(seen.writes).toHaveLength(0)
 		expect(summary).toContain('ethereum-testnet-sepolia=skipped')
-		expect(reads.map((r) => r.fn)).toEqual(['lastAsOf', 'maxAge', 'reportedStatus', 'reportedStatus', 'reportedStatus', 'reportedStatus'])
-		expect(reads.every((r) => r.finalized)).toBe(true)
+		// One snapshot() at the latest block, one at the finalized block.
+		expect(reads).toEqual([{ fn: 'snapshot', finalized: false }, { fn: 'snapshot', finalized: true }])
 	})
 
 	test('unchanged status but the heartbeat is due: writes', () => {
@@ -405,6 +405,24 @@ describe('heartbeat: read the chain first, write only when it matters', () => {
 		const stale = LIVE_ON_CHAIN(BigInt(NOW) - HOUR)
 		stale.triggerDocs[idx('DIGITAL_ASSET_MARKETS')] = docToBytes32('2026-21128')
 		onChain(network.chainSelector.selector, stale)
+		onCronTrigger(newTestRuntime(null, donTime, config) as any, payload)
+		expect(seen.writes).toHaveLength(1)
+	})
+
+	test('latest block holds a newer, different write: no skip on stale finalized data (audit 2026-10-20)', () => {
+		const seen = wire(live)
+		const newer = LIVE_ON_CHAIN(BigInt(NOW) - HOUR)
+		newer.statuses[idx('AML_SANCTIONS')] = Status.REVIEW
+		onChain(network.chainSelector.selector, newer, LIVE_ON_CHAIN(BigInt(NOW) - 2n * HOUR))
+		onCronTrigger(newTestRuntime(null, donTime, config) as any, payload)
+		expect(seen.writes).toHaveLength(1)
+	})
+
+	test('finalized state differs while latest matches: writes', () => {
+		const seen = wire(live)
+		const older = LIVE_ON_CHAIN(BigInt(NOW) - 2n * HOUR)
+		older.statuses[idx('AML_SANCTIONS')] = Status.REVIEW
+		onChain(network.chainSelector.selector, LIVE_ON_CHAIN(BigInt(NOW) - HOUR), older)
 		onCronTrigger(newTestRuntime(null, donTime, config) as any, payload)
 		expect(seen.writes).toHaveLength(1)
 	})
@@ -456,6 +474,15 @@ describe('mirror chains: the same status on Base Sepolia', () => {
 		onCronTrigger(newTestRuntime(null, donTime, withMirror) as any, payload)
 		expect(seen.writes).toHaveLength(0)
 		expect(baseWrites).toHaveLength(1)
+	})
+
+	test('a reviewer clear on the mirror contract re-verifies too', () => {
+		const seen = wire(live)
+		captureWrites(baseSepolia.chainSelector.selector)
+		const fromMirror = clearLog({ address: hexToBytes(MIRROR_RECEIVER as Hex) })
+		const summary = onLatchCleared(newTestRuntime(null, donTime, withMirror) as any, fromMirror)
+		expect(seen.urls).toHaveLength(2)
+		expect(summary).toContain('ethereum-testnet-sepolia-base-1=written')
 	})
 
 	test('a failed mirror write does not stop the primary, and the run still fails loudly', () => {

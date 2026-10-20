@@ -1,14 +1,16 @@
 {
   "network": "base-sepolia",
   "chainId": 84532,
-  "deployedAt": "2026-10-20T19:22:40.459Z",
+  "deployedAt": "2026-10-20T20:31:48.066Z",
   "deployer": "0xECDD02BFa99E9C102455E9DE286a9Ae6b7049942",
   "forwarder": "0x82300bd7c3958625581cc2f77bc6464dcecdf3e5",
   "maxAgeSeconds": 604800,
   "reviewer": "0xECDD02BFa99E9C102455E9DE286a9Ae6b7049942",
+  "simulation": true,
+  "expectedAuthor": "0x0000000000000000000000000000000000000000",
   "regGateStatus": {
-    "address": "0x03d0df9e8ef2785b241eacca9460a60dd4daa075",
-    "tx": "0x823702f94dc41e2d2e8aa812dab85ebb06b1824611191b3eaa0eae8e664ee8a4"
+    "address": "0x328c1c98b499485eaa499b3e3747a971a849dad9",
+    "tx": "0xdf5a15a1413557eb8fadc4ef3d775349e30ef073a6e633a5c5fd0cff6af31ce5"
   },
   "tokens": []
 }

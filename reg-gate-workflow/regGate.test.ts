@@ -180,7 +180,19 @@ describe('categoriesFor', () => {
 	})
 })
 
+describe('isProcedural anchors', () => {
+	const d = (title: string) => ({ title }) as FrDocument
+	test('only the exact procedural titles are procedural', () => {
+		expect(isProcedural(d('Agenda'))).toBe(true)
+		expect(isProcedural(d('Sunshine Act Meetings'))).toBe(true)
+		expect(isProcedural(d('Digital Asset Market Structure Agenda Implementation Rule'))).toBe(false)
+	})
+})
+
 describe('isOutOfScope', () => {
+	test('NCUA, a GENIUS Act stablecoin regulator, is watched (audit 2026-10-20)', () => {
+		expect(isOutOfScope({ agencySlugs: ['national-credit-union-administration'] } as FrDocument)).toBe(false)
+	})
 	const d = (agencySlugs: string[]) => ({ agencySlugs }) as FrDocument
 	test('unwatched agency is out of scope', () => {
 		expect(isOutOfScope(d(['national-institute-of-standards-and-technology']))).toBe(true)
@@ -230,14 +242,16 @@ describe('classify', () => {
 		const r = run([raw({ ...GENIUS, type: 'Sunshine Correction' })])
 		expect(r.statuses[idx('STABLECOINS')]).toBe(Status.BLOCK)
 	})
-	test('truncated results floor every category at REVIEW', () => {
+	test('truncated results floor every category at BLOCK (an unseen document could be a rule in effect)', () => {
 		const r = run([UNSAFE_PRACTICES], 75)
 		expect(r.truncated).toBe(true)
-		expect(r.statuses).toEqual([Status.REVIEW, Status.REVIEW, Status.REVIEW, Status.REVIEW])
+		expect(r.statuses).toEqual([Status.BLOCK, Status.BLOCK, Status.BLOCK, Status.BLOCK])
+		expect(r.blockDocs).toEqual([[], [], [], []]) // BLOCK with no document: reads BLOCK, nothing to clear
 	})
-	test('truncation never lowers an existing BLOCK', () => {
+	test('truncation keeps the blocking documents it did see', () => {
 		const r = run([raw({ ...GENIUS, type: 'Rule' })], 99)
 		expect(r.statuses[idx('STABLECOINS')]).toBe(Status.BLOCK)
+		expect(r.blockDocs[idx('STABLECOINS')]).toEqual(['2026-16796'])
 	})
 	test('document outside the requested window throws (do not trust the query)', () => {
 		expect(() => run([raw({ ...GENIUS, publication_date: '2026-10-15' })])).toThrow('outside requested window')
@@ -304,12 +318,50 @@ describe('effective dates: a final rule blocks when it takes effect, not when it
 		expect(() => classify(empty, W.start, W.end, undated)).toThrow('does not take effect in the requested window')
 		expect(() => classify(empty, W.start, W.end, proposal)).toThrow('not a final rule')
 	})
-	test('classify: a truncated effective-date query floors every category at REVIEW', () => {
+	test('classify: a truncated pending-rule query floors every category at BLOCK', () => {
 		const empty = parseFederalRegisterResponse(body([]))
 		const truncated = parseFederalRegisterResponse(body([], 120))
 		const r = classify(empty, W.start, W.end, truncated)
 		expect(r.truncated).toBe(true)
-		expect(r.statuses).toEqual([Status.REVIEW, Status.REVIEW, Status.REVIEW, Status.REVIEW])
+		expect(r.statuses).toEqual([Status.BLOCK, Status.BLOCK, Status.BLOCK, Status.BLOCK])
+	})
+
+	// Audit findings, 2026-10-20: the day a rule takes effect, and notice periods longer than the lookback.
+	const TODAY = '2026-10-01' // the run's date; W.end (2026-09-30) is yesterday
+	const HORIZON = '2027-10-02'
+	const P = (docs: unknown[]) => parseFederalRegisterResponse(body(docs))
+	test('a rule taking effect today reads BLOCK today, not tomorrow', () => {
+		const r = classify(P([]), W.start, W.end, P([raw({ ...FINAL, publication_date: '2026-05-01', effective_on: TODAY })]), TODAY, HORIZON)
+		expect(r.statuses[idx('STABLECOINS')]).toBe(Status.BLOCK)
+		expect(r.asOfDate).toBe(TODAY)
+	})
+	test('a rule published long before the window and pending for months reads REVIEW until it takes effect', () => {
+		const pending = raw({ ...FINAL, publication_date: '2026-03-01', effective_on: '2027-01-15' })
+		const r = classify(P([]), W.start, W.end, P([pending]), TODAY, HORIZON)
+		expect(r.statuses[idx('STABLECOINS')]).toBe(Status.REVIEW)
+		expect(r.blockDocs[idx('STABLECOINS')]).toEqual([])
+	})
+	test('the pending-rule query is bounded by the horizon, and the bound is enforced', () => {
+		const tooFar = raw({ ...FINAL, effective_on: '2028-01-01' })
+		expect(() => classify(P([]), W.start, W.end, P([tooFar]), TODAY, HORIZON)).toThrow('does not take effect in the requested window')
+	})
+	test('trigger is the most recent event: a rule taking effect beats one published more recently', () => {
+		const a = raw({ ...FINAL, document_number: '2026-30001', publication_date: '2026-09-25', effective_on: '2026-09-25' })
+		const b = raw({ ...FINAL, document_number: '2026-10001', publication_date: '2026-05-01', effective_on: '2026-09-28' })
+		const r = classify(P([a]), W.start, W.end, P([b]), TODAY, HORIZON)
+		expect(r.triggerDocs[idx('STABLECOINS')]).toBe('2026-10001')
+		expect(r.blockDocs[idx('STABLECOINS')]).toEqual(['2026-10001', '2026-30001']) // both listed, newest event first
+	})
+	test('every blocking document is listed, in a stable order regardless of input order', () => {
+		const docs = ['2026-40001', '2026-40002', '2026-40003'].map((n, k) => raw({ ...FINAL, document_number: n, publication_date: `2026-09-0${k + 1}`, effective_on: `2026-09-0${k + 1}` }))
+		const fwd = classify(P(docs), W.start, W.end, P([]), TODAY, HORIZON)
+		const rev = classify(P([...docs].reverse()), W.start, W.end, P([]), TODAY, HORIZON)
+		expect(fwd.blockDocs).toEqual(rev.blockDocs)
+		expect(fwd.blockDocs[idx('STABLECOINS')]).toEqual(['2026-40003', '2026-40002', '2026-40001'])
+	})
+	test('more blocking documents than the report can carry: write nothing rather than a partial list', () => {
+		const docs = Array.from({ length: 17 }, (_, k) => raw({ ...FINAL, document_number: `2026-5${String(k).padStart(4, '0')}`, effective_on: '2026-09-01' }))
+		expect(() => classify(P(docs), W.start, W.end, P([]), TODAY, HORIZON)).toThrow('exceed the report cap')
 	})
 })
 
@@ -365,6 +417,20 @@ describe('informational: seen and counted, never escalated', () => {
 		expect(informationalReason(doc({ ...WITHDRAWAL, type: 'Rule' }))).toBeNull()
 		expect(informationalReason(doc({ ...WITHDRAWAL, type: 'Notice' }))).toBeNull()
 	})
+	test('narrowed after the audit: FINRA filings and withdrawn exemptions take the normal path', () => {
+		// FINRA rule filings bind broker-dealers.
+		const finra = doc({ ...SRO, title: 'Self-Regulatory Organizations; Financial Industry Regulatory Authority, Inc.; Notice of Filing of a Proposed Rule Change on Crypto Asset Securities' })
+		expect(informationalReason(finra)).toBeNull()
+		// Withdrawing relief tightens obligations.
+		const relief = doc({ ...WITHDRAWAL, title: 'Exemption for Certain Digital Asset Transactions; Withdrawal' })
+		expect(informationalReason(relief)).toBeNull()
+	})
+	test('anchors hold: the pattern must sit where the rule says, not anywhere in the title', () => {
+		// "; Withdrawal" must end the title.
+		expect(informationalReason(doc({ ...WITHDRAWAL, title: 'Digital Asset Reporting; Withdrawal of Certain Provisions and New Requirements' }))).toBeNull()
+		// "Self-Regulatory Organizations;" must start the title.
+		expect(informationalReason(doc({ ...SRO, title: 'Crypto Custody; Self-Regulatory Organizations; Amendments' }))).toBeNull()
+	})
 	test('informational documents never lower a real signal in the same category', () => {
 		const r = run([SRO, REG_CRYPTO])
 		expect(r.statuses[idx('DIGITAL_ASSET_MARKETS')]).toBe(Status.REVIEW)
@@ -378,7 +444,12 @@ describe('informational: seen and counted, never escalated', () => {
 describe('computeWindow', () => {
 	test('ends the day before the scheduled run (UTC)', () => {
 		// 2026-10-19T01:59:23Z
-		expect(computeWindow(Date.UTC(2026, 9, 19, 1, 59, 23) / 1000, 14)).toEqual({ start: '2026-10-05', end: '2026-10-18' })
+		expect(computeWindow(Date.UTC(2026, 9, 19, 1, 59, 23) / 1000, 14)).toEqual({
+			start: '2026-10-05',
+			end: '2026-10-18',
+			today: '2026-10-19',
+			horizon: '2027-10-20',
+		})
 	})
 	test('every moment of the same UTC day gives the same window (node agreement)', () => {
 		const a = computeWindow(Date.UTC(2026, 9, 19, 0, 0, 0) / 1000, 7)
@@ -409,16 +480,16 @@ describe('buildQueryUrl', () => {
 		)
 	})
 	test('effective-date query: final rules only, bounded by effective date, not publication date', () => {
-		const url = buildEffectiveQueryUrl('https://www.federalregister.gov/api/v1/documents.json', W, 50)
+		const url = buildEffectiveQueryUrl('https://www.federalregister.gov/api/v1/documents.json', { start: W.start, horizon: '2027-10-01' }, 50)
 		expect(url).toContain('conditions%5Btype%5D%5B%5D=RULE')
 		expect(url).toContain('conditions%5Beffective_date%5D%5Bgte%5D=2026-08-01')
-		expect(url).toContain('conditions%5Beffective_date%5D%5Blte%5D=2026-09-30')
+		expect(url).toContain('conditions%5Beffective_date%5D%5Blte%5D=2027-10-01')
 		expect(url).not.toContain('publication_date%5D')
 		expect(url).not.toContain(' ')
 	})
 	test('refuses non-https', () => {
 		expect(() => buildQueryUrl('http://www.federalregister.gov/api', W, 50)).toThrow('https')
-		expect(() => buildEffectiveQueryUrl('http://www.federalregister.gov/api', W, 50)).toThrow('https')
+		expect(() => buildEffectiveQueryUrl('http://www.federalregister.gov/api', { start: W.start, horizon: W.end }, 50)).toThrow('https')
 	})
 })
 
@@ -428,6 +499,13 @@ describe('serialize and report encoding', () => {
 		const s = serializeResult(r)
 		expect(serializeResult(deserializeResult(s))).toBe(s)
 		expect(serializeResult(run([GENIUS, REG_CRYPTO]))).toBe(s) // input order does not matter
+	})
+	test('deserialize rejects bad blocking-document lists', () => {
+		const good = JSON.parse(serializeResult(r))
+		expect(() => deserializeResult(JSON.stringify({ ...good, blockDocs: [[], [], []] }))).toThrow('bad blockDocs')
+		expect(() => deserializeResult(JSON.stringify({ ...good, blockDocs: [[''], [], [], []] }))).toThrow()
+		// A listed document on a category that is not at BLOCK.
+		expect(() => deserializeResult(JSON.stringify({ ...good, statuses: [0, 0, 0, 0], blockDocs: [['2026-1'], [], [], []] }))).toThrow('not at BLOCK')
 	})
 	test('deserialize rejects tampered statuses', () => {
 		const bad = JSON.parse(serializeResult(r))
@@ -457,6 +535,8 @@ describe('writeDecision (heartbeat: skip only when sure nothing changes)', () =>
 		maxAge: 7n * 24n * H,
 		statuses: [...r.statuses],
 		triggerDocs: r.triggerDocs.map(docToBytes32),
+		blockDocs: [] as `0x${string}`[],
+		blockCats: [] as number[],
 		...over,
 	})
 	test('identical status, fresh report: skip', () => {
@@ -474,6 +554,13 @@ describe('writeDecision (heartbeat: skip only when sure nothing changes)', () =>
 		expect(writeDecision(held({ statuses: [0, 1, 1] }) as any, r, NOW, 24n * H).write).toBe(true)
 		expect(writeDecision(held({ triggerDocs: [] }) as any, r, NOW, 24n * H).write).toBe(true)
 		expect(writeDecision(held({ lastAsOf: 0n }) as any, r, NOW, 24n * H).reason).toBe('no report on-chain yet')
+	})
+	test('a change in the blocking documents writes, even with the same statuses and triggers', () => {
+		const rb = run([raw({ ...GENIUS, type: 'Rule' })])
+		const h = { lastAsOf: NOW - H, maxAge: 7n * 24n * H, statuses: [...rb.statuses], triggerDocs: rb.triggerDocs.map(docToBytes32), blockDocs: [] as `0x${string}`[], blockCats: [] as number[] }
+		expect(writeDecision(h, rb, NOW, 24n * H)).toEqual({ write: true, reason: 'blocking documents changed' })
+		const same = { ...h, blockDocs: [docToBytes32('2026-16796')], blockCats: [0] }
+		expect(writeDecision(same, rb, NOW, 24n * H).write).toBe(false)
 	})
 	test('any status or document change: write', () => {
 		const st = held()

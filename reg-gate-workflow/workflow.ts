@@ -30,6 +30,7 @@ import {
 	type HTTPSendRequester,
 	encodeCallMsg,
 	LAST_FINALIZED_BLOCK_NUMBER,
+	LATEST_BLOCK_NUMBER,
 	logTriggerConfig,
 	prepareReportRequest,
 	type Runtime,
@@ -60,7 +61,9 @@ import {
 	writeDecision,
 } from './regGate'
 
-const FR_PREFIX = 'https://www.federalregister.gov/api/v1/'
+// The one endpoint the workflow may query. An exact match, so no extra query string
+// or other endpoint can quietly narrow the results toward OK.
+export const FR_DOCUMENTS_URL = 'https://www.federalregister.gov/api/v1/documents.json'
 
 /** RegGateStatus emits this when the reviewer clears a latched BLOCK. */
 export const LATCH_CLEARED_SIGNATURE = 'LatchCleared(uint8,bytes32,address)'
@@ -89,7 +92,7 @@ export const configSchema = z
 		schedule: z.string().min(1),
 		frBaseUrl: z
 			.string()
-			.refine((u) => u.startsWith(FR_PREFIX), `frBaseUrl must start with ${FR_PREFIX}`),
+			.refine((u) => u === FR_DOCUMENTS_URL, `frBaseUrl must be exactly ${FR_DOCUMENTS_URL}`),
 		lookbackDays: z.number().int().min(1).max(90),
 		perPage: z.number().int().min(1).max(100),
 		// Primary chain: written every run (unless unchanged) and watched for LatchCleared.
@@ -130,16 +133,14 @@ export const targetsOf = (c: Config): Target[] => [
 	...(c.mirrors ?? []),
 ]
 
-// The RegGateStatus views the heartbeat reads. CI checks these against the compiled ABI.
+// The RegGateStatus view the heartbeat reads. CI checks it against the compiled ABI.
 export const STATUS_READ_ABI = parseAbi([
-	'function lastAsOf() view returns (uint64)',
-	'function maxAge() view returns (uint64)',
-	'function reportedStatus(uint8 category) view returns (uint8 status, bytes32 triggerDoc)',
+	'function snapshot() view returns (uint64 asOf, uint64 maxAge_, uint8[4] statuses, bytes32[4] triggerDocs, bytes32[] blockDocs, uint8[] blockCats)',
 ])
 // Reads come from the zero address: views need no sender, and nothing is signed.
 const READ_FROM: Address = '0x0000000000000000000000000000000000000000'
 
-type FetchArgs = { url: string; effectiveUrl: string; start: string; end: string }
+type FetchArgs = { url: string; effectiveUrl: string; start: string; end: string; today: string; horizon: string }
 
 const fetchBody = (sendRequester: HTTPSendRequester, url: string): string => {
 	const response = sendRequester.sendRequest({ method: 'GET', url }).result()
@@ -154,7 +155,7 @@ export const fetchAndClassify = (sendRequester: HTTPSendRequester, args: FetchAr
 	// Both queries must succeed. Half a picture is not reported as a whole one.
 	const published = parseFederalRegisterResponse(fetchBody(sendRequester, args.url))
 	const takingEffect = parseFederalRegisterResponse(fetchBody(sendRequester, args.effectiveUrl))
-	return serializeResult(classify(published, args.start, args.end, takingEffect))
+	return serializeResult(classify(published, args.start, args.end, takingEffect, args.today, args.horizon))
 }
 
 const resolveNetwork = (t: Pick<Target, 'chainSelectorName' | 'isTestnet'>) => {
@@ -169,46 +170,60 @@ const resolveNetwork = (t: Pick<Target, 'chainSelectorName' | 'isTestnet'>) => {
 
 type EvmClient = InstanceType<typeof cre.capabilities.EVMClient>
 
-/** One view call at the last finalized block. Throws on failure; the caller decides. */
-const readView = <const F extends 'lastAsOf' | 'maxAge' | 'reportedStatus'>(
-	runtime: Runtime<Config>,
-	evm: EvmClient,
-	to: Address,
-	functionName: F,
-	args: readonly unknown[],
-) => {
-	const data = encodeFunctionData({ abi: STATUS_READ_ABI, functionName, args } as any)
-	const reply = evm
-		.callContract(runtime, {
-			call: encodeCallMsg({ from: READ_FROM, to, data }),
-			blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
-		})
-		.result()
-	return decodeFunctionResult({ abi: STATUS_READ_ABI, functionName, data: bytesToHex(reply.data) } as any)
-}
+type BlockRef = { label: 'latest' | 'finalized'; ref: typeof LATEST_BLOCK_NUMBER }
 
 /**
- * What the contract on this chain holds now. Returns null on ANY failure: the
- * heartbeat treats an unreadable chain as "write", never as "unchanged".
- * Finalized, not latest: a report still in an unfinalized block reads as older,
- * which can only cause an extra write, never a skipped one.
+ * The contract's snapshot() at one block. Returns null on ANY failure: the heartbeat
+ * treats an unreadable chain as "write", never as "unchanged".
  */
-export const readOnChain = (runtime: Runtime<Config>, evm: EvmClient, receiver: Address): OnChainState | null => {
+export const readOnChain = (runtime: Runtime<Config>, evm: EvmClient, receiver: Address, at: BlockRef): OnChainState | null => {
 	try {
-		const lastAsOf = readView(runtime, evm, receiver, 'lastAsOf', []) as bigint
-		const maxAge = readView(runtime, evm, receiver, 'maxAge', []) as bigint
-		const statuses: number[] = []
-		const triggerDocs: Hex[] = []
-		for (let i = 0; i < CATEGORIES.length; i++) {
-			const [status, doc] = readView(runtime, evm, receiver, 'reportedStatus', [i]) as readonly [number, Hex]
-			statuses.push(Number(status))
-			triggerDocs.push(doc)
+		const reply = evm
+			.callContract(runtime, {
+				call: encodeCallMsg({ from: READ_FROM, to: receiver, data: encodeFunctionData({ abi: STATUS_READ_ABI, functionName: 'snapshot' }) }),
+				blockNumber: at.ref,
+			})
+			.result()
+		const [lastAsOf, maxAge, statuses, triggerDocs, blockDocs, blockCats] = decodeFunctionResult({
+			abi: STATUS_READ_ABI,
+			functionName: 'snapshot',
+			data: bytesToHex(reply.data),
+		})
+		return {
+			lastAsOf,
+			maxAge,
+			statuses: statuses.map(Number),
+			triggerDocs: [...triggerDocs],
+			blockDocs: [...blockDocs],
+			blockCats: blockCats.map(Number),
 		}
-		return { lastAsOf, maxAge, statuses, triggerDocs }
 	} catch (e) {
-		runtime.log(`Reg-Gate: on-chain read failed (${(e as Error).message}); will write`)
+		runtime.log(`Reg-Gate: on-chain read at ${at.label} failed (${(e as Error).message}); will write`)
 		return null
 	}
+}
+
+const AT_LATEST: BlockRef = { label: 'latest', ref: LATEST_BLOCK_NUMBER }
+const AT_FINALIZED: BlockRef = { label: 'finalized', ref: LAST_FINALIZED_BLOCK_NUMBER }
+
+/**
+ * Skip only if BOTH the latest and the finalized state already equal this result and
+ * neither is due a heartbeat. Latest alone could be reorged away; finalized alone can
+ * miss a newer write and skip on stale data. Any doubt writes.
+ */
+export const decideWrite = (
+	runtime: Runtime<Config>,
+	evm: EvmClient,
+	receiver: Address,
+	result: GateResult,
+	asOf: number,
+	heartbeatSeconds: bigint,
+) => {
+	const latest = writeDecision(readOnChain(runtime, evm, receiver, AT_LATEST), result, BigInt(asOf), heartbeatSeconds)
+	if (latest.write) return { write: true, reason: `${latest.reason} (latest block)` }
+	const finalized = writeDecision(readOnChain(runtime, evm, receiver, AT_FINALIZED), result, BigInt(asOf), heartbeatSeconds)
+	if (finalized.write) return { write: true, reason: `${finalized.reason} (finalized block)` }
+	return { write: false, reason: finalized.reason }
 }
 
 type ChainOutcome = { chain: string; outcome: 'written' | 'skipped' | 'failed'; detail: string }
@@ -227,7 +242,7 @@ const deliver = (
 		const evm = new cre.capabilities.EVMClient(network.chainSelector.selector)
 		const receiver = target.receiverAddress as Address
 
-		const decision = writeDecision(readOnChain(runtime, evm, receiver), result, BigInt(asOf), heartbeatSeconds)
+		const decision = decideWrite(runtime, evm, receiver, result, asOf, heartbeatSeconds)
 		if (!decision.write) {
 			runtime.log(`Reg-Gate: ${chain}: ${decision.reason}; no write`)
 			return { chain, outcome: 'skipped', detail: decision.reason }
@@ -270,6 +285,8 @@ export const runCheck = (runtime: Runtime<Config>): string => {
 			effectiveUrl,
 			start: window.start,
 			end: window.end,
+			today: window.today,
+			horizon: window.horizon,
 		})
 		.result()
 
@@ -305,7 +322,8 @@ export const onCronTrigger = (runtime: Runtime<Config>, payload: CronPayload): s
  */
 export const onLatchCleared = (runtime: Runtime<Config>, log: EVMLog): string => {
 	const emitter = bytesToHex(log.address).toLowerCase()
-	if (emitter !== runtime.config.receiverAddress.toLowerCase()) {
+	const receivers = targetsOf(runtime.config).map((t) => t.receiverAddress.toLowerCase())
+	if (!receivers.includes(emitter)) {
 		throw new Error(`Refusing log from unexpected contract ${emitter}`)
 	}
 	const topic0 = log.topics[0] ? bytesToHex(log.topics[0]).toLowerCase() : 'none'
@@ -320,22 +338,24 @@ export const onLatchCleared = (runtime: Runtime<Config>, log: EVMLog): string =>
 
 export function initWorkflow(config: Config) {
 	// Fail at startup, not mid-run, on a bad chain name (primary or mirror).
-	for (const t of targetsOf(config)) resolveNetwork(t)
-	const network = resolveNetwork(config)
+	const targets = targetsOf(config).map((t) => ({ t, network: resolveNetwork(t) }))
 	const cron = new cre.capabilities.CronCapability()
-	const evm = new cre.capabilities.EVMClient(network.chainSelector.selector)
+	// Order matters for `cre workflow simulate --trigger-index`:
+	//   0 = cron, 1 = LatchCleared on the primary chain, 2.. = LatchCleared on each mirror.
+	// A reviewer clear on any chain re-verifies right away.
 	return [
-		// Order matters for `cre workflow simulate --trigger-index`: 0 = cron, 1 = LatchCleared.
 		cre.handler(cron.trigger({ schedule: config.schedule }), onCronTrigger),
-		cre.handler(
-			evm.logTrigger(
-				logTriggerConfig({
-					addresses: [config.receiverAddress as Hex],
-					topics: [[LATCH_CLEARED_TOPIC]],
-					confidence: 'SAFE',
-				}),
+		...targets.map(({ t, network }) =>
+			cre.handler(
+				new cre.capabilities.EVMClient(network.chainSelector.selector).logTrigger(
+					logTriggerConfig({
+						addresses: [t.receiverAddress as Hex],
+						topics: [[LATCH_CLEARED_TOPIC]],
+						confidence: 'SAFE', // only logs at the chain's safe head, not the newest unconfirmed block
+					}),
+				),
+				onLatchCleared,
 			),
-			onLatchCleared,
 		),
 	]
 }

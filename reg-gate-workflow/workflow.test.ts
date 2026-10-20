@@ -1,4 +1,4 @@
-import { describe, expect } from 'bun:test'
+import { test as bunTest, describe, expect } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { newTestRuntime, test } from '@chainlink/cre-sdk/test'
@@ -30,6 +30,9 @@ describe('configSchema (reject bad config before anything runs)', () => {
 	test('rejects a non-Federal-Register URL', () => {
 		expect(configSchema.safeParse({ ...base, frBaseUrl: 'https://evil.example/api' }).success).toBe(false)
 		expect(configSchema.safeParse({ ...base, frBaseUrl: 'http://www.federalregister.gov/api/v1/x' }).success).toBe(false)
+		// Exact endpoint only: no extra query string, no other endpoint (audit 2026-10-20).
+		expect(configSchema.safeParse({ ...base, frBaseUrl: `${base.frBaseUrl}?conditions[agencies][]=x` }).success).toBe(false)
+		expect(configSchema.safeParse({ ...base, frBaseUrl: 'https://www.federalregister.gov/api/v1/public-inspection-documents.json' }).success).toBe(false)
 	})
 	test('rejects the zero address and malformed addresses', () => {
 		expect(configSchema.safeParse({ ...base, receiverAddress: `0x${'0'.repeat(40)}` }).success).toBe(false)
@@ -82,6 +85,7 @@ describe('initWorkflow', () => {
 		const addresses = trigger.config.addresses.map((a: Uint8Array) => bytesToHex(a).toLowerCase())
 		expect(addresses).toEqual([base.receiverAddress.toLowerCase()])
 		expect(trigger.config.topics).toHaveLength(1)
+		expect(trigger.config.confidence).toBe(0) // ConfidenceLevel.SAFE: not the newest unconfirmed block
 		const topic0 = trigger.config.topics[0].values.map((v: Uint8Array) => bytesToHex(Uint8Array.from(Object.values(v))))
 		expect(topic0).toEqual([LATCH_CLEARED_TOPIC])
 	})
@@ -99,6 +103,14 @@ describe('initWorkflow', () => {
 		)
 		for (const f of STATUS_READ_ABI) expect(compiled.has(toFunctionSelector(f))).toBe(true)
 	})
+	test('a reviewer clear on the mirror chain also triggers a re-check (handler 2)', () => {
+		const mirror = { chainSelectorName: 'ethereum-testnet-sepolia-base-1', isTestnet: true, receiverAddress: '0x000000000000000000000000000000000000bA5E', gasLimit: '1' }
+		const handlers = initWorkflow({ ...base, mirrors: [mirror] })
+		expect(handlers).toHaveLength(3)
+		expect(handlers[2].fn).toBe(onLatchCleared)
+		const trigger = handlers[2].trigger as any
+		expect(trigger.config.addresses.map((a: Uint8Array) => bytesToHex(a).toLowerCase())).toEqual([mirror.receiverAddress.toLowerCase()])
+	})
 	test('fails fast on an unknown chain name, primary or mirror', () => {
 		expect(() => initWorkflow({ ...base, chainSelectorName: 'not-a-chain' })).toThrow('Network not found')
 		const badMirror = { chainSelectorName: 'not-a-chain', isTestnet: true, receiverAddress: base.receiverAddress, gasLimit: '1' }
@@ -114,7 +126,8 @@ describe('onCronTrigger', () => {
 })
 
 describe('status page rules (docs/rules.js)', () => {
-	test('the committed docs/rules.js is exactly a fresh build of rules.ts', async () => {
+	// Skipped only inside planted-bugs.ts, where every rules.ts edit would trip this byte check.
+	bunTest.skipIf(process.env.PLANTED_BUGS === '1')('the committed docs/rules.js is exactly a fresh build of rules.ts', async () => {
 		const { buildRulesJs, RULES_JS } = await import('./build-page')
 		const norm = (s: string) => s.replace(/\r\n/g, '\n')
 		expect(norm(readFileSync(RULES_JS, 'utf-8'))).toBe(norm(await buildRulesJs()))

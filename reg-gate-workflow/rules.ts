@@ -59,8 +59,10 @@ export interface ParsedResponse {
 export interface GateResult {
 	windowStart: string
 	windowEnd: string
+	asOfDate: string // the run's consensus date; effective dates are judged against it
 	statuses: StatusCode[] // index matches CATEGORIES
 	triggerDocs: string[] // document number behind each status, '' when OK
+	blockDocs: string[][] // every document at BLOCK, per category, newest first
 	matched: number
 	ignored: number
 	informational: number // SRO filings and withdrawn proposals: seen, counted, not escalated
@@ -81,6 +83,7 @@ export const WATCHED_AGENCIES = new Set<string>([
 	'consumer-financial-protection-bureau',
 	'internal-revenue-service',
 	'executive-office-of-the-president',
+	'national-credit-union-administration', // a GENIUS Act stablecoin regulator
 ])
 
 const AML_AGENCIES = new Set<string>(['financial-crimes-enforcement-network', 'foreign-assets-control-office'])
@@ -140,6 +143,15 @@ export const FIELDS = [
 const SRO_TITLE = /^self-regulatory organizations;/
 // An agency withdrawing a proposal it published earlier: "...; Withdrawal".
 const WITHDRAWAL_TITLE = /;\s*withdrawal\.?$/
+// FINRA rule filings bind broker-dealers, so they are not treated as informational.
+const FINRA = /\bfinancial industry regulatory authority\b/
+// Withdrawing an exemption or relief tightens obligations, so it is not informational.
+const RELIEF = /\bexempt(ion|ions|ive)?\b|\brelief\b/
+
+// At most this many blocking documents in one report (the contract enforces the same cap).
+export const MAX_BLOCK_DOCS = 16
+// How far ahead the pending-rule query looks for final rules not yet in effect.
+export const EFFECTIVE_HORIZON_DAYS = 366
 
 const anyMatch = (patterns: RegExp[], text: string) => patterns.some((p) => p.test(text))
 
@@ -241,11 +253,12 @@ export function informationalReason(doc: FrDocument): 'sro-filing' | 'withdrawn-
 		type === 'notice' &&
 		doc.agencySlugs.length > 0 &&
 		doc.agencySlugs.every((s) => s === SEC) &&
-		SRO_TITLE.test(title)
+		SRO_TITLE.test(title) &&
+		!FINRA.test(title)
 	) {
 		return 'sro-filing'
 	}
-	if (type === 'proposed rule' && WITHDRAWAL_TITLE.test(title)) return 'withdrawn-proposal'
+	if (type === 'proposed rule' && WITHDRAWAL_TITLE.test(title) && !RELIEF.test(title)) return 'withdrawn-proposal'
 	return null
 }
 
@@ -376,10 +389,22 @@ export function explain(doc: FrDocument, asOfDate: string): Explanation {
 }
 
 // Deterministic tie-break: newest publication date first, then document number.
-const moreRecent = (a: FrDocument, b: FrDocument) =>
-	a.publicationDate !== b.publicationDate
-		? a.publicationDate > b.publicationDate
-		: a.documentNumber > b.documentNumber
+/**
+ * The date a document last changed anything: its effective date for a final rule
+ * that has taken effect since publication, otherwise its publication date.
+ */
+export function eventDate(doc: FrDocument, asOfDate: string): string {
+	if (normType(doc) === 'rule' && doc.effectiveOn !== '' && doc.effectiveOn <= asOfDate && doc.effectiveOn > doc.publicationDate) {
+		return doc.effectiveOn
+	}
+	return doc.publicationDate
+}
+
+const moreRecent = (a: FrDocument, b: FrDocument, asOfDate: string) => {
+	const ea = eventDate(a, asOfDate)
+	const eb = eventDate(b, asOfDate)
+	return ea !== eb ? ea > eb : a.documentNumber > b.documentNumber
+}
 
 const EMPTY: ParsedResponse = { count: 0, documents: [] }
 
@@ -393,9 +418,12 @@ export function classify(
 	windowStart: string,
 	windowEnd: string,
 	takingEffect: ParsedResponse = EMPTY,
+	asOfDate: string = windowEnd,
+	horizon: string = asOfDate,
 ): GateResult {
 	const statuses: StatusCode[] = CATEGORIES.map(() => Status.OK)
 	const triggers: (FrDocument | null)[] = CATEGORIES.map(() => null)
+	const blocking: FrDocument[][] = CATEGORIES.map(() => [])
 	let matched = 0
 	let ignored = 0
 	let informational = 0
@@ -410,7 +438,7 @@ export function classify(
 		if (normType(doc) !== 'rule') {
 			throw new Error(`FR document ${doc.documentNumber} from the effective-date query is not a final rule`)
 		}
-		if (doc.effectiveOn === '' || doc.effectiveOn < windowStart || doc.effectiveOn > windowEnd) {
+		if (doc.effectiveOn === '' || doc.effectiveOn < windowStart || doc.effectiveOn > horizon) {
 			throw new Error(`FR document ${doc.documentNumber} does not take effect in the requested window`)
 		}
 	}
@@ -439,30 +467,47 @@ export function classify(
 			continue
 		}
 		matched++
-		const sev = severityFor(doc, windowEnd)
+		const sev = severityFor(doc, asOfDate)
 		for (const cat of cats) {
 			const i = CATEGORIES.indexOf(cat)
 			const current = triggers[i]
-			if (sev > statuses[i] || (sev === statuses[i] && current !== null && moreRecent(doc, current))) {
+			if (sev > statuses[i] || (sev === statuses[i] && current !== null && moreRecent(doc, current, asOfDate))) {
 				statuses[i] = sev
 				triggers[i] = doc
 			}
+			if (sev === Status.BLOCK) blocking[i].push(doc)
 		}
 	}
 
+	// Every blocking document goes on-chain, so each one needs its own human review.
+	const blockDocs = blocking.map((list) =>
+		list
+			.slice()
+			.sort((a, b) => (moreRecent(a, b, asOfDate) ? -1 : moreRecent(b, a, asOfDate) ? 1 : 0))
+			.map((d) => d.documentNumber),
+	)
+	const total = blockDocs.reduce((n, l) => n + l.length, 0)
+	if (total > MAX_BLOCK_DOCS) {
+		// A partial list could let an unlisted document escape review. Write nothing;
+		// the contract's staleness rule turns that silence into BLOCK.
+		throw new Error(`${total} blocking documents exceed the report cap of ${MAX_BLOCK_DOCS}`)
+	}
+
+	// A result set larger than one page: we cannot vouch for what we did not see,
+	// and an unseen document could be a final rule in effect. Floor at BLOCK.
 	const truncated =
 		published.count > published.documents.length || takingEffect.count > takingEffect.documents.length
 	if (truncated) {
-		for (let i = 0; i < statuses.length; i++) {
-			if (statuses[i] < Status.REVIEW) statuses[i] = Status.REVIEW
-		}
+		for (let i = 0; i < statuses.length; i++) statuses[i] = Status.BLOCK
 	}
 
 	return {
 		windowStart,
 		windowEnd,
+		asOfDate,
 		statuses,
 		triggerDocs: triggers.map((d) => (d ? d.documentNumber : '')),
+		blockDocs,
 		matched,
 		ignored,
 		informational,
@@ -473,11 +518,20 @@ export function classify(
 const DAY_MS = 86_400_000
 const isoDate = (ms: number) => new Date(ms).toISOString().slice(0, 10)
 
+export interface Window {
+	start: string // first day of publications looked at
+	end: string // last finished day of publications (yesterday)
+	today: string // the run's own date: effective dates are fixed, so today is safe to judge
+	horizon: string // the pending-rule query looks this far ahead for rules not yet in effect
+}
+
 /**
- * Lookback window ending the day before the scheduled run. Using yesterday, not
- * today, keeps every node on the same finished day of publications, so they agree.
+ * Publication window ending the day before the run. Using yesterday, not today,
+ * keeps every node on the same finished day of publications, so they agree.
+ * Effective dates are printed in the document and never change, so they are
+ * judged against today, and pending rules are looked up to a year ahead.
  */
-export function computeWindow(scheduledUnixSeconds: number, lookbackDays: number): { start: string; end: string } {
+export function computeWindow(scheduledUnixSeconds: number, lookbackDays: number): Window {
 	if (!Number.isInteger(scheduledUnixSeconds) || scheduledUnixSeconds <= 0) {
 		throw new Error('scheduled time must be a positive integer')
 	}
@@ -486,7 +540,12 @@ export function computeWindow(scheduledUnixSeconds: number, lookbackDays: number
 	}
 	const dayStart = Math.floor((scheduledUnixSeconds * 1000) / DAY_MS) * DAY_MS
 	const endMs = dayStart - DAY_MS
-	return { start: isoDate(endMs - (lookbackDays - 1) * DAY_MS), end: isoDate(endMs) }
+	return {
+		start: isoDate(endMs - (lookbackDays - 1) * DAY_MS),
+		end: isoDate(endMs),
+		today: isoDate(dayStart),
+		horizon: isoDate(dayStart + EFFECTIVE_HORIZON_DAYS * DAY_MS),
+	}
 }
 
 /** Federal Register query URL. Built by hand: the CRE runtime may lack URLSearchParams. */
@@ -515,14 +574,14 @@ export function buildQueryUrl(baseUrl: string, window: { start: string; end: str
 /** Final rules that take effect inside the window, whenever they were published. */
 export function buildEffectiveQueryUrl(
 	baseUrl: string,
-	window: { start: string; end: string },
+	window: { start: string; horizon: string },
 	perPage: number,
 ): string {
 	const enc = encodeURIComponent
 	return queryUrl(baseUrl, perPage, [
 		`${enc('conditions[type][]')}=RULE`,
 		`${enc('conditions[effective_date][gte]')}=${window.start}`,
-		`${enc('conditions[effective_date][lte]')}=${window.end}`,
+		`${enc('conditions[effective_date][lte]')}=${window.horizon}`,
 	])
 }
 
@@ -531,8 +590,10 @@ export function serializeResult(r: GateResult): string {
 	return JSON.stringify({
 		windowStart: r.windowStart,
 		windowEnd: r.windowEnd,
+		asOfDate: r.asOfDate,
 		statuses: r.statuses,
 		triggerDocs: r.triggerDocs,
+		blockDocs: r.blockDocs,
 		matched: r.matched,
 		ignored: r.ignored,
 		informational: r.informational,
@@ -548,6 +609,16 @@ export function deserializeResult(s: string): GateResult {
 	for (const k of ['matched', 'ignored', 'informational'] as const) {
 		if (!Number.isInteger(r[k]) || r[k] < 0) throw new Error(`bad ${k}`)
 	}
+	if (!Array.isArray(r.blockDocs) || r.blockDocs.length !== CATEGORIES.length) throw new Error('bad blockDocs')
+	let total = 0
+	r.blockDocs.forEach((list, i) => {
+		if (!Array.isArray(list) || !list.every((d) => typeof d === 'string' && d.length > 0 && d.length <= 32)) {
+			throw new Error('bad blockDocs entry')
+		}
+		if (list.length > 0 && r.statuses[i] !== Status.BLOCK) throw new Error('blockDocs on a category not at BLOCK')
+		total += list.length
+	})
+	if (total > MAX_BLOCK_DOCS) throw new Error('too many blockDocs')
 	return r
 }
 
@@ -555,5 +626,6 @@ export function summarize(r: GateResult): string {
 	const lines = CATEGORIES.map(
 		(c, i) => `${c}=${STATUS_NAMES[r.statuses[i]]}${r.triggerDocs[i] ? ` (${r.triggerDocs[i]})` : ''}`,
 	)
-	return `window ${r.windowStart}..${r.windowEnd} matched=${r.matched} ignored=${r.ignored} informational=${r.informational} truncated=${r.truncated} | ${lines.join(' ')}`
+	const blocking = r.blockDocs.reduce((n, l) => n + l.length, 0)
+	return `window ${r.windowStart}..${r.windowEnd} asOf=${r.asOfDate} blocking=${blocking} matched=${r.matched} ignored=${r.ignored} informational=${r.informational} truncated=${r.truncated} | ${lines.join(' ')}`
 }

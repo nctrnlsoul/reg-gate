@@ -32,14 +32,23 @@ contract GatedTokenTest {
 
     function setUp() public {
         vm.warp(T0);
-        gate = new RegGateStatus(FORWARDER, MAX_AGE, REVIEWER);
+        gate = new RegGateStatus(FORWARDER, MAX_AGE, REVIEWER, address(0), true); // simulation mode
         lenient = new GatedToken("Gated USD", "gUSD", address(gate), STABLECOINS, false, 1_000 ether);
         strictToken = new GatedToken("Gated Asset", "gAST", address(gate), MARKETS, true, 1_000 ether);
     }
 
+    /// Every BLOCK category lists its trigger document, as the workflow does.
     function _report(uint64 asOf, uint8[4] memory s, bytes32[4] memory d) internal {
+        uint256 n;
+        for (uint256 i = 0; i < 4; i++) if (s[i] == 2 && d[i] != bytes32(0)) n++;
+        bytes32[] memory bd = new bytes32[](n);
+        uint8[] memory bc = new uint8[](n);
+        uint256 k;
+        for (uint8 i = 0; i < 4; i++) {
+            if (s[i] == 2 && d[i] != bytes32(0)) (bd[k], bc[k], k) = (d[i], i, k + 1);
+        }
         vm.prank(FORWARDER);
-        gate.onReport("", abi.encode(block.chainid, asOf, s, d));
+        gate.onReport("", abi.encode(block.chainid, asOf, s, d, bd, bc));
     }
 
     function _noDocs() internal pure returns (bytes32[4] memory d) {}
@@ -87,7 +96,7 @@ contract GatedTokenTest {
         require(!lenient.transfersAllowed(), "latched BLOCK survives an OK report");
 
         vm.prank(REVIEWER);
-        gate.clearLatch(STABLECOINS);
+        gate.clearLatch(STABLECOINS, DOC);
         lenient.transfer(ALICE, 1 ether); // latest report is OK and latch cleared
         require(lenient.balanceOf(ALICE) == 1 ether, "moved after clear");
     }
@@ -116,5 +125,50 @@ contract GatedTokenTest {
         vm.prank(BOB);
         vm.expectRevert(GatedToken.InsufficientAllowance.selector);
         lenient.transferFrom(address(this), BOB, 1);
+    }
+
+    function test_constructorRejectsZeroGate() public {
+        vm.expectRevert(GatedToken.ZeroAddress.selector);
+        new GatedToken("Bad", "BAD", address(0), 0, false, 1);
+    }
+
+    function test_transferToZeroAddressReverts() public {
+        _report(T0, [uint8(0), 0, 0, 0], _noDocs());
+        vm.expectRevert(GatedToken.ZeroAddress.selector);
+        lenient.transfer(address(0), 1);
+    }
+
+    function test_zeroValueTransferIsStillGated() public {
+        vm.expectRevert(abi.encodeWithSelector(GatedToken.TransferBlockedByRegGate.selector, STABLECOINS, uint8(2)));
+        lenient.transfer(ALICE, 0);
+    }
+
+    function test_maxAllowanceIsNotSpent() public {
+        _report(T0, [uint8(0), 0, 0, 0], _noDocs());
+        lenient.approve(BOB, type(uint256).max);
+        vm.prank(BOB);
+        lenient.transferFrom(address(this), ALICE, 1 ether);
+        require(lenient.allowance(address(this), BOB) == type(uint256).max, "max allowance untouched");
+    }
+
+    function test_blockedTransferFromLeavesAllowanceUntouched() public {
+        _report(T0, [uint8(2), 0, 0, 0], [DOC, bytes32(0), bytes32(0), bytes32(0)]);
+        lenient.approve(BOB, 5 ether);
+        vm.prank(BOB);
+        vm.expectRevert(abi.encodeWithSelector(GatedToken.TransferBlockedByRegGate.selector, STABLECOINS, uint8(2)));
+        lenient.transferFrom(address(this), ALICE, 1 ether);
+        require(lenient.allowance(address(this), BOB) == 5 ether, "revert rolled the allowance back");
+    }
+
+    function test_reviewedBlockPassesLenientNotStrict() public {
+        // Both tokens on MARKETS for a like-for-like comparison.
+        GatedToken lenientMarkets = new GatedToken("L", "L", address(gate), MARKETS, false, 1_000 ether);
+        bytes32[4] memory d = [bytes32(0), bytes32(0), DOC, bytes32(0)];
+        _report(T0, [uint8(0), 0, 2, 0], d);
+        vm.prank(REVIEWER);
+        gate.clearLatch(MARKETS, DOC);
+        _report(T0 + 60, [uint8(0), 0, 2, 0], d); // the reviewed document is still reported
+        require(lenientMarkets.transfersAllowed(), "reviewed BLOCK reads REVIEW: lenient passes");
+        require(!strictToken.transfersAllowed(), "strict still stops on REVIEW");
     }
 }

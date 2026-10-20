@@ -1,30 +1,30 @@
 {
   "chainId": 11155111,
-  "regGateStatus": "0x03d0df9e8ef2785b241eacca9460a60dd4daa075",
+  "regGateStatus": "0x7a69df6b68752e9e6377eb144dda7fbb594f7d9a",
   "forwarder": "0x15fC6ae953E024d975e77382eEeC56A9101f9F88",
+  "fromBlock": 11957684,
   "demoHolder": "0xECDD02BFa99E9C102455E9DE286a9Ae6b7049942",
-  "fromBlock": 11945381,
   "tokens": [
     {
       "symbol": "gUSD",
       "category": "STABLECOINS",
       "strict": false,
-      "address": "0x1495a7c7b7be43c0503a1dfd3a4d63d027d3b2de"
+      "address": "0xc2bb916e02130f9461ad47a4011b5e31a189df7b"
     },
     {
       "symbol": "gAST",
       "category": "DIGITAL_ASSET_MARKETS",
       "strict": true,
-      "address": "0x328c1c98b499485eaa499b3e3747a971a849dad9"
+      "address": "0xc3aedef662a6437a8f16a67c567bdbe56cf29cda"
     }
   ],
   "mirrors": [
     {
       "name": "Base Sepolia",
       "chainId": 84532,
-      "regGateStatus": "0x03d0df9e8ef2785b241eacca9460a60dd4daa075",
+      "regGateStatus": "0x328c1c98b499485eaa499b3e3747a971a849dad9",
       "forwarder": "0x82300bd7c3958625581cc2f77bc6464dcecdf3e5",
-      "fromBlock": 48377937,
+      "fromBlock": 48380011,
       "explorer": "https://sepolia.basescan.org"
     }
   ]

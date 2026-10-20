@@ -2,17 +2,17 @@
   "schedule": "0 0 */6 * * *",
   "frBaseUrl": "https://www.federalregister.gov/api/v1/documents.json",
   "lookbackDays": 14,
-  "perPage": 50,
+  "perPage": 100,
   "chainSelectorName": "ethereum-testnet-sepolia",
   "isTestnet": true,
-  "receiverAddress": "0x03d0df9e8ef2785b241eacca9460a60dd4daa075",
+  "receiverAddress": "0x7a69df6b68752e9e6377eb144dda7fbb594f7d9a",
   "gasLimit": "1000000",
   "heartbeatHours": 24,
   "mirrors": [
     {
       "chainSelectorName": "ethereum-testnet-sepolia-base-1",
       "isTestnet": true,
-      "receiverAddress": "0x03d0df9e8ef2785b241eacca9460a60dd4daa075",
+      "receiverAddress": "0x328c1c98b499485eaa499b3e3747a971a849dad9",
       "gasLimit": "1000000"
     }
   ]

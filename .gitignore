@@ -1,6 +1,6 @@
-# secrets: never commit
+# secrets: never commit (.env, .env.local, .env.production, ...)
+.env*
 *.env
-.env
 
 # dependencies and build output
 node_modules/
