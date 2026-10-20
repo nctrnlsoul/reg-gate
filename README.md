@@ -8,7 +8,8 @@ fail-closed status on-chain. Token contracts check it before every transfer.
 
 - **Live status page:** https://nctrnlsoul.github.io/reg-gate/
 - **Contract on Sepolia:** [`0x03d0…a075`](https://sepolia.etherscan.io/address/0x03d0df9e8ef2785b241eacca9460a60dd4daa075) (full record in [`deploy/deployments/sepolia.json`](deploy/deployments/sepolia.json))
-- **Verification:** 58 workflow tests, 33 contract tests, every planted bug caught (details below)
+- **Contracts verified on Etherscan:** RegGateStatus, gUSD and gAST (source, ABI, Read Contract)
+- **Verification:** 77 workflow tests, 33 contract tests, every planted bug caught (details below)
 
 > Reg-Gate flags regulatory publications for human review. It is not legal advice and
 > does not interpret the law.
@@ -38,19 +39,31 @@ signal a token can act on, and it is built to fail safe: when it does not know, 
                                                              └──────────────────────────┘
 ```
 
-1. **Fetch.** On a cron schedule (or when a reviewer clears a latch, see step 6), every node queries the public Federal Register API for a
-   fixed lookback window ending the day before the run, so all nodes see the same finished
-   day of publications.
+1. **Fetch.** On a cron schedule (or when a reviewer clears a latch, see step 6), every node
+   makes two queries to the public Federal Register API over a fixed lookback window ending
+   the day before the run, so all nodes see the same finished days: documents published in
+   the window, and final rules taking effect in the window, whenever they were published.
+   Both must succeed or nothing is written.
 2. **Classify.** A deterministic rules engine ([`reg-gate-workflow/regGate.ts`](reg-gate-workflow/regGate.ts))
    sorts documents into `STABLECOINS`, `TOKENIZED_SECURITIES`, `DIGITAL_ASSET_MARKETS`,
    `AML_SANCTIONS`. Only watched regulators count: SEC, CFTC, Treasury, OCC, FDIC, Fed,
    FinCEN, OFAC, CFPB, IRS, and the Executive Office of the President.
 
-   | Document type | Status |
+   | Document | Status |
    |---|---|
-   | Final Rule, Presidential Document | `BLOCK` |
+   | Final Rule in effect, or with no effective date | `BLOCK` |
+   | Final Rule not yet in effect | `REVIEW` until its effective date, then `BLOCK` |
+   | Presidential Document | `BLOCK` |
    | Proposed Rule, Notice | `REVIEW` |
+   | An exchange's own rule filing that the SEC publishes for comment (SRO notice) | informational |
+   | An agency withdrawing its own proposal | informational |
    | Anything else | `BLOCK` (unknown fails closed) |
+
+   A final rule blocks when it takes effect, not when it is published, so issuers get the
+   notice period the agency gave them. Informational documents are counted in every run's
+   log but never move a status: neither puts a new obligation on an issuer. Both checks match
+   type and title exactly (the SRO check also requires the SEC to be the only agency), so a
+   near miss takes the normal path.
 
 3. **Agree.** Nodes must return byte-identical results. There is no LLM in the decision
    path on purpose: LLM output differs between runs and would break consensus.
@@ -80,6 +93,11 @@ Every flagged document was checked by hand. One live false positive was found an
 a CFTC proposal named "Regulation Crypto Asset Transactions" was tagged as tokenized
 securities. That rule now applies only to the SEC, with a regression test.
 
+The same review found two blunt calls, fixed on 2026-10-20. The Markets `REVIEW` came from an
+exchange's options-listing filing, and the AML `REVIEW` from FinCEN withdrawing a proposal,
+which removes an obligation rather than adding one. Both are now informational (see the
+table above), and both documents are regression tests.
+
 With those statuses, the demo token `gUSD` (stablecoins, lenient) transfers freely and
 `gAST` (digital asset markets, strict) is blocked at REVIEW.
 
@@ -107,7 +125,9 @@ yourself with `bun deploy/status.ts` (read-only, no key, no gas).
 | No report ever received | `BLOCK` |
 | Last report older than `maxAge` | `BLOCK` |
 | Matched document of unknown type | `BLOCK` |
-| More results than one page holds | Every category floored at `REVIEW` |
+| Final rule with no effective date | `BLOCK` (treated as already in effect) |
+| Effective-date query fails, or returns a non-rule or a date outside the window | Nothing written |
+| More results than one page holds, on either query | Every category floored at `REVIEW` |
 | `BLOCK` reported | Latches through later `OK` reports until the reviewer clears it |
 | Reviewer cleared, same document still in window | `REVIEW`, never `OK` |
 | New blocking document after a clear | Latches again, right away: the clear itself triggers a re-check |
@@ -126,9 +146,9 @@ replay and same-chain replay of a failed report.
 reg-gate-workflow/
   regGate.ts            classifier, parser, query builder, report encoder (pure, deterministic)
   workflow.ts           CRE wiring: cron or LatchCleared -> fetch -> consensus -> report -> write
-  regGate.test.ts       37 classifier tests
+  regGate.test.ts       53 classifier tests
   workflow.test.ts      9 config and trigger-wiring tests
-  e2e.test.ts           12 end-to-end tests: real handlers for both triggers, mocked HTTP and chain
+  e2e.test.ts           15 end-to-end tests: real handlers for both triggers, mocked HTTP and chain
 contracts/
   src/RegGateStatus.sol    on-chain receiver
   src/GatedToken.sol       demo ERC-20 gated on a category
@@ -197,8 +217,8 @@ and a 7-day `maxAge` so the status page stays readable between runs.
 
 | Suite | Tests | Planted bugs caught |
 |---|---|---|
-| Classifier (`regGate.test.ts`) | 37 | 9 of 9 |
-| Workflow end to end (`e2e.test.ts`) | 12 | 6 of 6 |
+| Classifier (`regGate.test.ts`) | 53 | 24 of 24 |
+| Workflow end to end (`e2e.test.ts`) | 15 | 7 of 7 |
 | Config and trigger wiring (`workflow.test.ts`) | 9 | |
 | LatchCleared trigger (handler + wiring) | in the two rows above | 8 of 8 |
 | RegGateStatus | 24 | 12 of 12 |
@@ -226,6 +246,12 @@ Also verified by hand on 2026-10-18:
   contract ABI, so renaming the event cannot leave the trigger listening for nothing.
 - The status page in a headless browser across live, latched, stale, unreachable and
   not-deployed states, desktop and mobile, light and dark.
+
+Also verified by hand on 2026-10-20:
+- The `effective_on` field and the `conditions[type][]=RULE` and `conditions[effective_date]`
+  filters against the live Federal Register API.
+- The SRO and withdrawal exclusions against the live documents that triggered them
+  (2026-21128, 2026-20430, 2026-20429).
 
 ## License
 

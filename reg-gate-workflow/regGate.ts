@@ -8,8 +8,19 @@
 //   - A response that does not match the expected shape throws. The workflow then
 //     writes nothing, and the on-chain contract treats missing or stale data as BLOCK.
 //   - A matched document of an unknown type is BLOCK, not OK.
+//   - A final rule with no effective date is treated as already in effect (BLOCK).
 //   - A truncated result set (more documents than we received) floors every
 //     category at REVIEW, because we cannot vouch for what we did not see.
+//
+// Timing: a final rule BLOCKs when it takes effect, not when it is published.
+// Between publication and its effective date it is REVIEW, so issuers get the
+// notice period the agency gave them. A second query finds rules that take effect
+// inside the window even when they were published months earlier.
+//
+// Two narrow exclusions, both anchored on type and title so near misses take the
+// normal path: an exchange's own rule filing that the SEC publishes for comment
+// (an SRO notice), and an agency withdrawing its own proposal. Neither puts a new
+// obligation on an issuer. They are counted as informational, never dropped silently.
 //
 // Claim boundary: this flags regulatory publications for human review.
 // It is not legal advice and does not interpret the law.
@@ -33,6 +44,7 @@ export interface FrDocument {
 	title: string
 	type: string
 	publicationDate: string // YYYY-MM-DD
+	effectiveOn: string // YYYY-MM-DD, '' when the API gave none
 	abstract: string
 	agencySlugs: string[] // '' when the API gave no slug
 }
@@ -49,6 +61,7 @@ export interface GateResult {
 	triggerDocs: string[] // document number behind each status, '' when OK
 	matched: number
 	ignored: number
+	informational: number // SRO filings and withdrawn proposals: seen, counted, not escalated
 	truncated: boolean
 }
 
@@ -110,7 +123,21 @@ const PROCEDURAL_TITLES = [/^agenda$/, /\bunified agenda\b/, /\bregulatory agend
 export const SEARCH_TERM =
 	'stablecoin | stablecoins | "digital asset" | "digital assets" | crypto | cryptocurrency | "virtual currency" | bitcoin | tokenized | tokenization | blockchain | "distributed ledger"'
 
-export const FIELDS = ['document_number', 'title', 'type', 'publication_date', 'abstract', 'agencies'] as const
+export const FIELDS = [
+	'document_number',
+	'title',
+	'type',
+	'publication_date',
+	'effective_on',
+	'abstract',
+	'agencies',
+] as const
+
+// Exchange and clearing-agency rule filings. The SEC publishes these for comment
+// under the title prefix "Self-Regulatory Organizations;".
+const SRO_TITLE = /^self-regulatory organizations;/
+// An agency withdrawing a proposal it published earlier: "...; Withdrawal".
+const WITHDRAWAL_TITLE = /;\s*withdrawal\.?$/
 
 const anyMatch = (patterns: RegExp[], text: string) => patterns.some((p) => p.test(text))
 
@@ -148,6 +175,10 @@ export function parseFederalRegisterResponse(body: string): ParsedResponse {
 		if (!isNonEmptyString(r.publication_date) || !DATE_RE.test(r.publication_date)) {
 			throw new Error(`FR result ${i} has bad publication_date`)
 		}
+		const eff = r.effective_on
+		if (eff !== null && eff !== undefined && eff !== '' && (typeof eff !== 'string' || !DATE_RE.test(eff))) {
+			throw new Error(`FR result ${i} has bad effective_on`)
+		}
 		if (r.abstract !== null && r.abstract !== undefined && typeof r.abstract !== 'string') {
 			throw new Error(`FR result ${i} has bad abstract`)
 		}
@@ -162,6 +193,7 @@ export function parseFederalRegisterResponse(body: string): ParsedResponse {
 			title: r.title,
 			type: r.type,
 			publicationDate: r.publication_date,
+			effectiveOn: typeof eff === 'string' ? eff : '',
 			abstract: typeof r.abstract === 'string' ? r.abstract : '',
 			agencySlugs,
 		}
@@ -181,6 +213,38 @@ export function severityForType(type: string): StatusCode {
 		default:
 			return Status.BLOCK
 	}
+}
+
+const normType = (doc: FrDocument) => doc.type.trim().toLowerCase()
+
+/**
+ * Severity of a matched document as of `asOfDate` (the last finished day).
+ * A final rule that has not taken effect yet is REVIEW; one in effect, or with no
+ * effective date at all, is BLOCK.
+ */
+export function severityFor(doc: FrDocument, asOfDate: string): StatusCode {
+	if (normType(doc) === 'rule' && doc.effectiveOn !== '' && doc.effectiveOn > asOfDate) return Status.REVIEW
+	return severityForType(doc.type)
+}
+
+/**
+ * Why a document is informational rather than a gate signal, or null if it is not.
+ * Both checks are exact on type and title, and the SRO check also requires the SEC
+ * to be the only agency, so anything unusual takes the normal path.
+ */
+export function informationalReason(doc: FrDocument): 'sro-filing' | 'withdrawn-proposal' | null {
+	const title = doc.title.trim().toLowerCase()
+	const type = normType(doc)
+	if (
+		type === 'notice' &&
+		doc.agencySlugs.length > 0 &&
+		doc.agencySlugs.every((s) => s === SEC) &&
+		SRO_TITLE.test(title)
+	) {
+		return 'sro-filing'
+	}
+	if (type === 'proposed rule' && WITHDRAWAL_TITLE.test(title)) return 'withdrawn-proposal'
+	return null
 }
 
 /** Which categories a document touches. Empty means not relevant. */
@@ -221,17 +285,50 @@ const moreRecent = (a: FrDocument, b: FrDocument) =>
 		? a.publicationDate > b.publicationDate
 		: a.documentNumber > b.documentNumber
 
-export function classify(parsed: ParsedResponse, windowStart: string, windowEnd: string): GateResult {
+const EMPTY: ParsedResponse = { count: 0, documents: [] }
+
+/**
+ * @param published documents published inside the window
+ * @param takingEffect final rules whose effective date falls inside the window,
+ *   whatever their publication date (the second query)
+ */
+export function classify(
+	published: ParsedResponse,
+	windowStart: string,
+	windowEnd: string,
+	takingEffect: ParsedResponse = EMPTY,
+): GateResult {
 	const statuses: StatusCode[] = CATEGORIES.map(() => Status.OK)
 	const triggers: (FrDocument | null)[] = CATEGORIES.map(() => null)
 	let matched = 0
 	let ignored = 0
+	let informational = 0
 
-	for (const doc of parsed.documents) {
-		// The query already bounds the window; enforce it again rather than trust it.
+	// Each query already bounds its window; enforce it again rather than trust it.
+	for (const doc of published.documents) {
 		if (doc.publicationDate < windowStart || doc.publicationDate > windowEnd) {
 			throw new Error(`FR document ${doc.documentNumber} outside requested window`)
 		}
+	}
+	for (const doc of takingEffect.documents) {
+		if (normType(doc) !== 'rule') {
+			throw new Error(`FR document ${doc.documentNumber} from the effective-date query is not a final rule`)
+		}
+		if (doc.effectiveOn === '' || doc.effectiveOn < windowStart || doc.effectiveOn > windowEnd) {
+			throw new Error(`FR document ${doc.documentNumber} does not take effect in the requested window`)
+		}
+	}
+
+	// A rule published and taking effect in the same window comes back from both queries.
+	const seen = new Set<string>()
+	const docs: FrDocument[] = []
+	for (const doc of [...published.documents, ...takingEffect.documents]) {
+		if (seen.has(doc.documentNumber)) continue
+		seen.add(doc.documentNumber)
+		docs.push(doc)
+	}
+
+	for (const doc of docs) {
 		if (isOutOfScope(doc) || isProcedural(doc)) {
 			ignored++
 			continue
@@ -241,8 +338,12 @@ export function classify(parsed: ParsedResponse, windowStart: string, windowEnd:
 			ignored++
 			continue
 		}
+		if (informationalReason(doc) !== null) {
+			informational++
+			continue
+		}
 		matched++
-		const sev = severityForType(doc.type)
+		const sev = severityFor(doc, windowEnd)
 		for (const cat of cats) {
 			const i = CATEGORIES.indexOf(cat)
 			const current = triggers[i]
@@ -253,7 +354,8 @@ export function classify(parsed: ParsedResponse, windowStart: string, windowEnd:
 		}
 	}
 
-	const truncated = parsed.count > parsed.documents.length
+	const truncated =
+		published.count > published.documents.length || takingEffect.count > takingEffect.documents.length
 	if (truncated) {
 		for (let i = 0; i < statuses.length; i++) {
 			if (statuses[i] < Status.REVIEW) statuses[i] = Status.REVIEW
@@ -267,6 +369,7 @@ export function classify(parsed: ParsedResponse, windowStart: string, windowEnd:
 		triggerDocs: triggers.map((d) => (d ? d.documentNumber : '')),
 		matched,
 		ignored,
+		informational,
 		truncated,
 	}
 }
@@ -291,7 +394,7 @@ export function computeWindow(scheduledUnixSeconds: number, lookbackDays: number
 }
 
 /** Federal Register query URL. Built by hand: the CRE runtime may lack URLSearchParams. */
-export function buildQueryUrl(baseUrl: string, window: { start: string; end: string }, perPage: number): string {
+function queryUrl(baseUrl: string, perPage: number, conditions: string[]): string {
 	if (!baseUrl.startsWith('https://')) throw new Error('FR base URL must be https')
 	const enc = encodeURIComponent
 	const parts = [
@@ -299,10 +402,32 @@ export function buildQueryUrl(baseUrl: string, window: { start: string; end: str
 		'order=newest',
 		...FIELDS.map((f) => `${enc('fields[]')}=${f}`),
 		`${enc('conditions[term]')}=${enc(SEARCH_TERM)}`,
-		`${enc('conditions[publication_date][gte]')}=${window.start}`,
-		`${enc('conditions[publication_date][lte]')}=${window.end}`,
+		...conditions,
 	]
 	return `${baseUrl}?${parts.join('&')}`
+}
+
+/** Documents published inside the window. */
+export function buildQueryUrl(baseUrl: string, window: { start: string; end: string }, perPage: number): string {
+	const enc = encodeURIComponent
+	return queryUrl(baseUrl, perPage, [
+		`${enc('conditions[publication_date][gte]')}=${window.start}`,
+		`${enc('conditions[publication_date][lte]')}=${window.end}`,
+	])
+}
+
+/** Final rules that take effect inside the window, whenever they were published. */
+export function buildEffectiveQueryUrl(
+	baseUrl: string,
+	window: { start: string; end: string },
+	perPage: number,
+): string {
+	const enc = encodeURIComponent
+	return queryUrl(baseUrl, perPage, [
+		`${enc('conditions[type][]')}=RULE`,
+		`${enc('conditions[effective_date][gte]')}=${window.start}`,
+		`${enc('conditions[effective_date][lte]')}=${window.end}`,
+	])
 }
 
 /** Canonical string form so the DON can require identical results across nodes. */
@@ -314,6 +439,7 @@ export function serializeResult(r: GateResult): string {
 		triggerDocs: r.triggerDocs,
 		matched: r.matched,
 		ignored: r.ignored,
+		informational: r.informational,
 		truncated: r.truncated,
 	})
 }
@@ -323,6 +449,9 @@ export function deserializeResult(s: string): GateResult {
 	if (!Array.isArray(r.statuses) || r.statuses.length !== CATEGORIES.length) throw new Error('bad statuses')
 	if (!r.statuses.every((x) => x === 0 || x === 1 || x === 2)) throw new Error('bad status value')
 	if (!Array.isArray(r.triggerDocs) || r.triggerDocs.length !== CATEGORIES.length) throw new Error('bad triggerDocs')
+	for (const k of ['matched', 'ignored', 'informational'] as const) {
+		if (!Number.isInteger(r[k]) || r[k] < 0) throw new Error(`bad ${k}`)
+	}
 	return r
 }
 
@@ -353,5 +482,5 @@ export function summarize(r: GateResult): string {
 	const lines = CATEGORIES.map(
 		(c, i) => `${c}=${STATUS_NAMES[r.statuses[i]]}${r.triggerDocs[i] ? ` (${r.triggerDocs[i]})` : ''}`,
 	)
-	return `window ${r.windowStart}..${r.windowEnd} matched=${r.matched} ignored=${r.ignored} truncated=${r.truncated} | ${lines.join(' ')}`
+	return `window ${r.windowStart}..${r.windowEnd} matched=${r.matched} ignored=${r.ignored} informational=${r.informational} truncated=${r.truncated} | ${lines.join(' ')}`
 }

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { decodeAbiParameters, hexToString, type Hex } from 'viem'
 import {
+	buildEffectiveQueryUrl,
 	buildQueryUrl,
 	CATEGORIES,
 	categoriesFor,
@@ -9,11 +10,14 @@ import {
 	deserializeResult,
 	encodeReport,
 	type FrDocument,
+	informationalReason,
 	isOutOfScope,
 	parseFederalRegisterResponse,
 	serializeResult,
+	severityFor,
 	severityForType,
 	Status,
+	summarize,
 } from './regGate'
 
 const W = { start: '2026-08-01', end: '2026-09-30' }
@@ -93,6 +97,15 @@ describe('parseFederalRegisterResponse (fail closed on surprises)', () => {
 		expect(() => parseFederalRegisterResponse(body([raw({ agencies: null })]))).toThrow('agencies')
 		expect(() => parseFederalRegisterResponse(body([raw({ abstract: 42 })]))).toThrow('abstract')
 	})
+	test('effective_on: a date is kept, null or absent becomes empty, anything else throws', () => {
+		expect(parseFederalRegisterResponse(body([raw({ effective_on: '2026-11-17' })])).documents[0].effectiveOn).toBe(
+			'2026-11-17',
+		)
+		expect(parseFederalRegisterResponse(body([raw({ effective_on: null })])).documents[0].effectiveOn).toBe('')
+		expect(parseFederalRegisterResponse(body([raw()])).documents[0].effectiveOn).toBe('')
+		expect(() => parseFederalRegisterResponse(body([raw({ effective_on: '11/17/2026' })]))).toThrow('effective_on')
+		expect(() => parseFederalRegisterResponse(body([raw({ effective_on: 20261117 })]))).toThrow('effective_on')
+	})
 	test('null abstract becomes empty string, missing slug becomes empty string', () => {
 		const p = parseFederalRegisterResponse(body([raw({ abstract: null, agencies: [{ raw_name: 'X' }] })]))
 		expect(p.documents[0].abstract).toBe('')
@@ -121,6 +134,7 @@ describe('categoriesFor', () => {
 		title,
 		type: 'Notice',
 		publicationDate: '2026-09-01',
+		effectiveOn: '',
 		abstract,
 		agencySlugs,
 	})
@@ -235,6 +249,128 @@ describe('classify', () => {
 	})
 })
 
+describe('effective dates: a final rule blocks when it takes effect, not when it is published', () => {
+	const asDoc = (o: Record<string, unknown>) => parseFederalRegisterResponse(body([raw(o)])).documents[0]
+	const FINAL = { ...GENIUS, document_number: '2026-19000', type: 'Rule', publication_date: '2026-09-15' }
+
+	test('severityFor: pending rule is REVIEW; in effect, or effective that day, is BLOCK', () => {
+		expect(severityFor(asDoc({ ...FINAL, effective_on: '2026-11-14' }), W.end)).toBe(Status.REVIEW)
+		expect(severityFor(asDoc({ ...FINAL, effective_on: '2026-09-30' }), W.end)).toBe(Status.BLOCK)
+		expect(severityFor(asDoc({ ...FINAL, effective_on: '2026-09-15' }), W.end)).toBe(Status.BLOCK)
+	})
+	test('severityFor: a final rule with no effective date fails closed to BLOCK', () => {
+		expect(severityFor(asDoc({ ...FINAL, effective_on: null }), W.end)).toBe(Status.BLOCK)
+	})
+	test('severityFor: only a final rule earns the grace period', () => {
+		// The API fills effective_on on some proposals; it changes nothing there.
+		expect(severityFor(asDoc({ ...GENIUS, effective_on: '2026-08-18' }), W.end)).toBe(Status.REVIEW)
+		// A future date never softens a presidential document or an unknown type.
+		expect(severityFor(asDoc({ ...FINAL, type: 'Presidential Document', effective_on: '2026-12-01' }), W.end)).toBe(
+			Status.BLOCK,
+		)
+		expect(severityFor(asDoc({ ...FINAL, type: 'Interim Final Rule', effective_on: '2026-12-01' }), W.end)).toBe(
+			Status.BLOCK,
+		)
+	})
+	test('classify: rule published in the window but effective later is REVIEW', () => {
+		const r = run([raw({ ...FINAL, effective_on: '2026-11-14' })])
+		expect(r.statuses[idx('STABLECOINS')]).toBe(Status.REVIEW)
+		expect(r.triggerDocs[idx('STABLECOINS')]).toBe('2026-19000')
+	})
+	test('classify: rule published months earlier that takes effect in the window is BLOCK', () => {
+		const old = raw({ ...FINAL, publication_date: '2026-05-01', effective_on: '2026-09-02' })
+		const r = classify(parseFederalRegisterResponse(body([])), W.start, W.end, parseFederalRegisterResponse(body([old])))
+		expect(r.statuses[idx('STABLECOINS')]).toBe(Status.BLOCK)
+		expect(r.triggerDocs[idx('STABLECOINS')]).toBe('2026-19000')
+		expect(r.matched).toBe(1)
+	})
+	test('classify: a rule returned by both queries is counted once', () => {
+		const both = raw({ ...FINAL, effective_on: '2026-09-20' })
+		const p = parseFederalRegisterResponse(body([both]))
+		const r = classify(p, W.start, W.end, p)
+		expect(r.matched).toBe(1)
+		expect(r.statuses[idx('STABLECOINS')]).toBe(Status.BLOCK)
+	})
+	test('classify: the effective-date query is not trusted either', () => {
+		const empty = parseFederalRegisterResponse(body([]))
+		const late = parseFederalRegisterResponse(body([raw({ ...FINAL, effective_on: '2026-10-05' })]))
+		const undated = parseFederalRegisterResponse(body([raw({ ...FINAL, effective_on: null })]))
+		const proposal = parseFederalRegisterResponse(body([raw({ ...GENIUS, effective_on: '2026-09-02' })]))
+		expect(() => classify(empty, W.start, W.end, late)).toThrow('does not take effect in the requested window')
+		expect(() => classify(empty, W.start, W.end, undated)).toThrow('does not take effect in the requested window')
+		expect(() => classify(empty, W.start, W.end, proposal)).toThrow('not a final rule')
+	})
+	test('classify: a truncated effective-date query floors every category at REVIEW', () => {
+		const empty = parseFederalRegisterResponse(body([]))
+		const truncated = parseFederalRegisterResponse(body([], 120))
+		const r = classify(empty, W.start, W.end, truncated)
+		expect(r.truncated).toBe(true)
+		expect(r.statuses).toEqual([Status.REVIEW, Status.REVIEW, Status.REVIEW, Status.REVIEW])
+	})
+})
+
+describe('informational: seen and counted, never escalated', () => {
+	const SEC_AGENCY = [{ name: 'Securities and Exchange Commission', slug: 'securities-and-exchange-commission' }]
+	// Live shapes: 2026-21128 (Cboe filing) and 2026-20429 (FinCEN withdrawal), 2026-10.
+	const SRO = raw({
+		document_number: '2026-21128',
+		title:
+			'Self-Regulatory Organizations; Cboe BZX Exchange, Inc.; Notice of Filing of a Proposed Rule Change To List and Trade Options on Commodity-Based Trusts Holding Multiple Crypto Assets',
+		type: 'Notice',
+		publication_date: '2026-09-16',
+		agencies: SEC_AGENCY,
+	})
+	const WITHDRAWAL = raw({
+		document_number: '2026-20429',
+		title:
+			'Proposal of Special Measure Regarding Convertible Virtual Currency Mixing, as a Class of Transactions of Primary Money Laundering Concern; Withdrawal',
+		type: 'Proposed Rule',
+		publication_date: '2026-09-06',
+		agencies: [
+			{ name: 'Treasury Department', slug: 'treasury-department' },
+			{ name: 'Financial Crimes Enforcement Network', slug: 'financial-crimes-enforcement-network' },
+		],
+	})
+	const doc = (o: Record<string, unknown>) => parseFederalRegisterResponse(body([raw(o)])).documents[0]
+
+	test('an exchange rule filing published by the SEC is informational', () => {
+		expect(informationalReason(doc(SRO))).toBe('sro-filing')
+		const r = run([SRO])
+		expect(r.statuses).toEqual([Status.OK, Status.OK, Status.OK, Status.OK])
+		expect(r.informational).toBe(1)
+		expect(r.matched).toBe(0)
+	})
+	test('an agency withdrawing its own proposal is informational', () => {
+		expect(informationalReason(doc(WITHDRAWAL))).toBe('withdrawn-proposal')
+		const r = run([WITHDRAWAL])
+		expect(r.statuses[idx('AML_SANCTIONS')]).toBe(Status.OK)
+		expect(r.informational).toBe(1)
+	})
+	test('near misses take the normal path', () => {
+		// SRO title, but another agency is on it.
+		expect(informationalReason(doc({ ...SRO, agencies: [...SEC_AGENCY, { name: 'CFTC', slug: 'commodity-futures-trading-commission' }] }))).toBeNull()
+		// SRO title, but a missing slug or no agency at all: unknown, so not excluded.
+		expect(informationalReason(doc({ ...SRO, agencies: [{ raw_name: 'SEC' }] }))).toBeNull()
+		expect(informationalReason(doc({ ...SRO, agencies: [] }))).toBeNull()
+		// SRO title on a proposed or final rule: the SEC itself acting.
+		expect(informationalReason(doc({ ...SRO, type: 'Proposed Rule' }))).toBeNull()
+		expect(informationalReason(doc({ ...SRO, type: 'Rule' }))).toBeNull()
+		// "Withdrawal" as a subject, not the action.
+		expect(informationalReason(doc({ ...WITHDRAWAL, title: 'Withdrawal Limits for Digital Asset Custody Accounts' }))).toBeNull()
+		// Withdrawing a final rule, or anything not a proposal, is a change in force: normal path.
+		expect(informationalReason(doc({ ...WITHDRAWAL, type: 'Rule' }))).toBeNull()
+		expect(informationalReason(doc({ ...WITHDRAWAL, type: 'Notice' }))).toBeNull()
+	})
+	test('informational documents never lower a real signal in the same category', () => {
+		const r = run([SRO, REG_CRYPTO])
+		expect(r.statuses[idx('DIGITAL_ASSET_MARKETS')]).toBe(Status.REVIEW)
+		expect(r.triggerDocs[idx('DIGITAL_ASSET_MARKETS')]).toBe('2026-17183')
+	})
+	test('the summary reports the informational count', () => {
+		expect(summarize(run([SRO, WITHDRAWAL, GENIUS]))).toContain('matched=1 ignored=0 informational=2')
+	})
+})
+
 describe('computeWindow', () => {
 	test('ends the day before the scheduled run (UTC)', () => {
 		// 2026-10-19T01:59:23Z
@@ -263,8 +399,22 @@ describe('buildQueryUrl', () => {
 		expect(url).not.toContain(' ')
 		expect(url).not.toContain('"')
 	})
+	test('asks for effective dates', () => {
+		expect(buildQueryUrl('https://www.federalregister.gov/api/v1/documents.json', W, 50)).toContain(
+			'fields%5B%5D=effective_on',
+		)
+	})
+	test('effective-date query: final rules only, bounded by effective date, not publication date', () => {
+		const url = buildEffectiveQueryUrl('https://www.federalregister.gov/api/v1/documents.json', W, 50)
+		expect(url).toContain('conditions%5Btype%5D%5B%5D=RULE')
+		expect(url).toContain('conditions%5Beffective_date%5D%5Bgte%5D=2026-08-01')
+		expect(url).toContain('conditions%5Beffective_date%5D%5Blte%5D=2026-09-30')
+		expect(url).not.toContain('publication_date%5D')
+		expect(url).not.toContain(' ')
+	})
 	test('refuses non-https', () => {
 		expect(() => buildQueryUrl('http://www.federalregister.gov/api', W, 50)).toThrow('https')
+		expect(() => buildEffectiveQueryUrl('http://www.federalregister.gov/api', W, 50)).toThrow('https')
 	})
 })
 

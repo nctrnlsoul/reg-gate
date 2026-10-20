@@ -7,8 +7,9 @@
 //     instead of waiting up to one cron interval.
 //
 // Each check:
-//   1. Each DON node fetches U.S. Federal Register publications for a fixed,
-//      finished date window and classifies them (regGate.ts, deterministic).
+//   1. Each DON node makes two Federal Register queries over a fixed, finished date
+//      window (documents published in it, and final rules taking effect in it) and
+//      classifies them (regGate.ts, deterministic).
 //   2. Nodes must return byte-identical results (identical consensus). Any
 //      disagreement fails the run, nothing is written, and the contract's
 //      staleness rule turns that silence into BLOCK.
@@ -32,6 +33,7 @@ import {
 import { type Address, type Hex, toEventSelector } from 'viem'
 import { z } from 'zod'
 import {
+	buildEffectiveQueryUrl,
 	buildQueryUrl,
 	CATEGORIES,
 	classify,
@@ -69,16 +71,22 @@ export const configSchema = z
 
 export type Config = z.infer<typeof configSchema>
 
-type FetchArgs = { url: string; start: string; end: string }
+type FetchArgs = { url: string; effectiveUrl: string; start: string; end: string }
 
-/** Runs on each node. Throws on anything unexpected; the DON then writes nothing. */
-export const fetchAndClassify = (sendRequester: HTTPSendRequester, args: FetchArgs): string => {
-	const response = sendRequester.sendRequest({ method: 'GET', url: args.url }).result()
+const fetchBody = (sendRequester: HTTPSendRequester, url: string): string => {
+	const response = sendRequester.sendRequest({ method: 'GET', url }).result()
 	if (response.statusCode !== 200) {
 		throw new Error(`Federal Register request failed with status ${response.statusCode}`)
 	}
-	const body = Buffer.from(response.body).toString('utf-8')
-	return serializeResult(classify(parseFederalRegisterResponse(body), args.start, args.end))
+	return Buffer.from(response.body).toString('utf-8')
+}
+
+/** Runs on each node. Throws on anything unexpected; the DON then writes nothing. */
+export const fetchAndClassify = (sendRequester: HTTPSendRequester, args: FetchArgs): string => {
+	// Both queries must succeed. Half a picture is not reported as a whole one.
+	const published = parseFederalRegisterResponse(fetchBody(sendRequester, args.url))
+	const takingEffect = parseFederalRegisterResponse(fetchBody(sendRequester, args.effectiveUrl))
+	return serializeResult(classify(published, args.start, args.end, takingEffect))
 }
 
 const resolveNetwork = (config: Config) => {
@@ -101,12 +109,14 @@ export const runCheck = (runtime: Runtime<Config>): string => {
 	const asOf = Math.floor(runtime.now().getTime() / 1000)
 	const window = computeWindow(asOf, config.lookbackDays)
 	const url = buildQueryUrl(config.frBaseUrl, window, config.perPage)
-	runtime.log(`Reg-Gate: querying Federal Register ${window.start}..${window.end}`)
+	const effectiveUrl = buildEffectiveQueryUrl(config.frBaseUrl, window, config.perPage)
+	runtime.log(`Reg-Gate: querying Federal Register ${window.start}..${window.end} (published, taking effect)`)
 
 	const http = new cre.capabilities.HTTPClient()
 	const agreed = http
 		.sendRequest(runtime, fetchAndClassify, consensusIdenticalAggregation<string>())({
 			url,
+			effectiveUrl,
 			start: window.start,
 			end: window.end,
 		})
