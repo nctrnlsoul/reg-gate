@@ -19,7 +19,7 @@
     'comptroller-of-the-currency': 'OCC', 'federal-deposit-insurance-corporation': 'FDIC',
     'federal-reserve-system': 'Federal Reserve', 'foreign-assets-control-office': 'OFAC',
     'consumer-financial-protection-bureau': 'CFPB', 'internal-revenue-service': 'IRS',
-    'executive-office-of-the-president': 'White House',
+    'executive-office-of-the-president': 'White House', 'national-credit-union-administration': 'NCUA',
   };
   const T_STATUS = '0x7bb7e136e435ccb26bf677f3fce3572a4c8b33fad6b75908d576edff5ac77af8';
   const T_LATCHED = '0x45ca50b55474b3b1c5577ef29d3ec7bcb578f4353ccb6d3f10e3d0715a649963';
