@@ -295,6 +295,9 @@ function classify(published, windowStart, windowEnd, takingEffect = EMPTY, asOfD
     if (doc.effectiveOn === "" || doc.effectiveOn < windowStart || doc.effectiveOn > horizon) {
       throw new Error(`FR document ${doc.documentNumber} does not take effect in the requested window`);
     }
+    if (doc.publicationDate > windowEnd) {
+      throw new Error(`FR document ${doc.documentNumber} from the effective-date query was published after the window`);
+    }
   }
   const seen = new Set;
   const docs = [];
@@ -397,7 +400,8 @@ function buildEffectiveQueryUrl(baseUrl, window, perPage) {
   return queryUrl(baseUrl, perPage, [
     `${enc("conditions[type][]")}=RULE`,
     `${enc("conditions[effective_date][gte]")}=${window.start}`,
-    `${enc("conditions[effective_date][lte]")}=${window.horizon}`
+    `${enc("conditions[effective_date][lte]")}=${window.horizon}`,
+    `${enc("conditions[publication_date][lte]")}=${window.end}`
   ]);
 }
 function serializeResult(r) {

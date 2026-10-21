@@ -14,7 +14,7 @@
 //   - A matched document of an unknown type is BLOCK, not OK.
 //   - A final rule with no effective date is treated as already in effect (BLOCK).
 //   - A truncated result set (more documents than we received) floors every
-//     category at REVIEW, because we cannot vouch for what we did not see.
+//     category at BLOCK, because we cannot vouch for what we did not see.
 //
 // Timing: a final rule BLOCKs when it takes effect, not when it is published.
 // Between publication and its effective date it is REVIEW, so issuers get the
@@ -441,6 +441,9 @@ export function classify(
 		if (doc.effectiveOn === '' || doc.effectiveOn < windowStart || doc.effectiveOn > horizon) {
 			throw new Error(`FR document ${doc.documentNumber} does not take effect in the requested window`)
 		}
+		if (doc.publicationDate > windowEnd) {
+			throw new Error(`FR document ${doc.documentNumber} from the effective-date query was published after the window`)
+		}
 	}
 
 	// A rule published and taking effect in the same window comes back from both queries.
@@ -571,10 +574,14 @@ export function buildQueryUrl(baseUrl: string, window: { start: string; end: str
 	])
 }
 
-/** Final rules that take effect inside the window, whenever they were published. */
+/**
+ * Final rules that take effect inside the window, published any time up to the window's
+ * last finished day. The publication cap keeps today's still-posting issue out, so every
+ * node sees the same documents.
+ */
 export function buildEffectiveQueryUrl(
 	baseUrl: string,
-	window: { start: string; horizon: string },
+	window: { start: string; end: string; horizon: string },
 	perPage: number,
 ): string {
 	const enc = encodeURIComponent
@@ -582,6 +589,7 @@ export function buildEffectiveQueryUrl(
 		`${enc('conditions[type][]')}=RULE`,
 		`${enc('conditions[effective_date][gte]')}=${window.start}`,
 		`${enc('conditions[effective_date][lte]')}=${window.horizon}`,
+		`${enc('conditions[publication_date][lte]')}=${window.end}`,
 	])
 }
 

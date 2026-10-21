@@ -14,9 +14,10 @@
 //      disagreement fails the run, nothing is written, and the contract's
 //      staleness rule turns that silence into BLOCK.
 //   3. For each target chain (the primary plus any mirrors), the workflow reads what
-//      RegGateStatus already holds at the last finalized block. If nothing changed and
-//      the heartbeat is not due, it skips the write. Otherwise the agreed result is
-//      signed into a report bound to that chain's ID and written there.
+//      RegGateStatus already holds at the latest and the last finalized block. It skips
+//      the write only if both equal the new result and the heartbeat is not due.
+//      Otherwise the agreed result is signed into a report bound to that chain's ID and
+//      written there.
 //
 // Flags regulatory publications for human review. Not legal advice.
 

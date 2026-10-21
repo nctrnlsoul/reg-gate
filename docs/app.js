@@ -202,7 +202,7 @@
   function tryShowMetrics() {
     if (metricsShown || !metricsVisible || !pendingMetrics) return;
     metricsShown = true;
-    countUp($('m1'), pendingMetrics.notClear); countUp($('m2'), pendingMetrics.blocked); countUp($('m3'), pendingMetrics.age); countUp($('m4'), 170);
+    countUp($('m1'), pendingMetrics.notClear); countUp($('m2'), pendingMetrics.blocked); countUp($('m3'), pendingMetrics.age); countUp($('m4'), 171);
   }
   function setMetrics(m) {
     pendingMetrics = m;
@@ -308,7 +308,7 @@
     }
     if (warn) row('Note', el('span', 'warnline', 'This recomputation differs from the stored report. The contract enforces the report. A difference means the rules changed after that report or the result set was truncated.'));
     const foot = el('div', 'tfoot');
-    if (rules) foot.append('Recomputed in your browser by ', el('code', null, 'rules.js'), ', a build of the classifier every DON node runs.');
+    if (rules) foot.append('Recomputed in your browser by ', el('code', null, 'rules.js'), ', a build of the classifier the CRE workflow runs.');
     else foot.append('Recomputation unavailable. Every status above comes from the contract.');
     box.replaceChildren(dl, foot);
   }

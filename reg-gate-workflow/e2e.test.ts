@@ -132,6 +132,7 @@ describe('onCronTrigger end to end', () => {
 		expect(seen.urls[1]).toContain('conditions%5Btype%5D%5B%5D=RULE')
 		expect(seen.urls[1]).toContain('conditions%5Beffective_date%5D%5Bgte%5D=2026-10-05')
 		expect(seen.urls[1]).toContain('conditions%5Beffective_date%5D%5Blte%5D=2027-10-20') // pending rules up to a year ahead
+		expect(seen.urls[1]).toContain('conditions%5Bpublication_date%5D%5Blte%5D=2026-10-18') // finished days only, so nodes agree
 
 		// Wrote exactly one report, to the configured receiver.
 		expect(seen.writes).toHaveLength(1)

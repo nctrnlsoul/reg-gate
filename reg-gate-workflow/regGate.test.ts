@@ -345,6 +345,10 @@ describe('effective dates: a final rule blocks when it takes effect, not when it
 		const tooFar = raw({ ...FINAL, effective_on: '2028-01-01' })
 		expect(() => classify(P([]), W.start, W.end, P([tooFar]), TODAY, HORIZON)).toThrow('does not take effect in the requested window')
 	})
+	test('a pending rule published after the window end throws (the query caps it; do not trust the query)', () => {
+		const tooNew = raw({ ...FINAL, publication_date: TODAY, effective_on: '2026-11-01' })
+		expect(() => classify(P([]), W.start, W.end, P([tooNew]), TODAY, HORIZON)).toThrow('published after the window')
+	})
 	test('trigger is the most recent event: a rule taking effect beats one published more recently', () => {
 		const a = raw({ ...FINAL, document_number: '2026-30001', publication_date: '2026-09-25', effective_on: '2026-09-25' })
 		const b = raw({ ...FINAL, document_number: '2026-10001', publication_date: '2026-05-01', effective_on: '2026-09-28' })
@@ -479,12 +483,15 @@ describe('buildQueryUrl', () => {
 			'fields%5B%5D=effective_on',
 		)
 	})
-	test('effective-date query: final rules only, bounded by effective date, not publication date', () => {
-		const url = buildEffectiveQueryUrl('https://www.federalregister.gov/api/v1/documents.json', { start: W.start, horizon: '2027-10-01' }, 50)
+	test('effective-date query: final rules only, by effective date, published no later than the window end', () => {
+		const url = buildEffectiveQueryUrl('https://www.federalregister.gov/api/v1/documents.json', { ...W, horizon: '2027-10-01' }, 50)
 		expect(url).toContain('conditions%5Btype%5D%5B%5D=RULE')
 		expect(url).toContain('conditions%5Beffective_date%5D%5Bgte%5D=2026-08-01')
 		expect(url).toContain('conditions%5Beffective_date%5D%5Blte%5D=2027-10-01')
-		expect(url).not.toContain('publication_date%5D')
+		// No lower publication bound (old rules with long notice periods still count),
+		// but an upper one: today's issue may still be posting, and nodes must agree.
+		expect(url).toContain('conditions%5Bpublication_date%5D%5Blte%5D=2026-09-30')
+		expect(url).not.toContain('publication_date%5D%5Bgte%5D')
 		expect(url).not.toContain(' ')
 	})
 	test('refuses non-https', () => {

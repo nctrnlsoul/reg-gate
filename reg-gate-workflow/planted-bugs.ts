@@ -42,6 +42,8 @@ const workflow: Bug[] = [
 	{ file: W('rules.ts'), find: "	if (total > MAX_BLOCK_DOCS) {", replace: "	if (false) {", name: 'Over-cap blocking list written partially' },
 	{ file: W('rules.ts'), find: "		for (let i = 0; i < statuses.length; i++) statuses[i] = Status.BLOCK", replace: "		for (let i = 0; i < statuses.length; i++) if (statuses[i] < Status.REVIEW) statuses[i] = Status.REVIEW", name: 'Truncation floors at REVIEW, not BLOCK' },
 	{ file: W('rules.ts'), find: " || takingEffect.count > takingEffect.documents.length", replace: '', name: 'Truncated pending-rule query ignored' },
+	{ file: W('rules.ts'), find: "		`${enc('conditions[publication_date][lte]')}=${window.end}`,\n	])\n}\n\n/** Canonical", replace: "	])\n}\n\n/** Canonical", name: 'Pending-rule query reads the still-posting issue' },
+	{ file: W('rules.ts'), find: "		if (doc.publicationDate > windowEnd) {", replace: "		if (false) {", name: 'Pending rule published after the window accepted' },
 	{ file: W('rules.ts'), find: "	return ea !== eb ? ea > eb : a.documentNumber > b.documentNumber", replace: "	return a.publicationDate !== b.publicationDate ? a.publicationDate > b.publicationDate : a.documentNumber > b.documentNumber", name: 'Trigger chosen by publication date, not event date' },
 	{ file: W('rules.ts'), find: "		today: isoDate(dayStart),", replace: "		today: isoDate(endMs),", name: 'Effective dates judged against yesterday' },
 	{ file: W('rules.ts'), find: "if (list.length > 0 && r.statuses[i] !== Status.BLOCK) throw new Error('blockDocs on a category not at BLOCK')", replace: '', name: 'Deserializer accepts documents on a non-BLOCK category' },
