@@ -8,6 +8,7 @@ fail-closed status on-chain. Tokens check it before every transfer, and every bl
 document needs a named human review, recorded on-chain.
 
 - **Live status page:** https://nctrnlsoul.github.io/reg-gate/ (statuses read from the contract on both chains, a transfer simulator, and a "why this status" trail)
+- **Deck (PDF):** https://nctrnlsoul.github.io/reg-gate/Reg-Gate-Deck.pdf
 - **Two chains:** Ethereum Sepolia and Base Sepolia, each report bound to its own chain ID, all contracts verified on Etherscan and Basescan
 - **Tests:** 120 workflow tests, 51 contract tests, and 72 of 72 planted bugs caught (`bun planted-bugs.ts`)
 
