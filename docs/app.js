@@ -314,7 +314,7 @@
   }
 
   // ---------- Transfer simulator (eth_call only)
-  let simTokens = [], simHolder = null, simSetup = false;
+  let simTokens = [], simHolder = null, simSetup = false, simGen = 0;
   const SIM_ERR = { '0xf87edc4d': 'TransferBlockedByRegGate', '0xf4d678b8': 'InsufficientBalance', '0xd92e233d': 'ZeroAddress' };
   function parseAmount(v) {
     const m = /^(\d{1,12})(?:\.(\d{1,18}))?$/.exec(v);
@@ -355,6 +355,7 @@
       lab.append(inp, sp); fs.append(lab);
     }
     $('simform').addEventListener('submit', (ev) => { ev.preventDefault(); runSim(); });
+    fs.addEventListener('change', () => runSim()); // a new token gets its own result at once
     for (const id of ['simamt', 'simto']) $(id).addEventListener('input', () => { $(id).removeAttribute('aria-invalid'); $('simerr').textContent = ''; });
     if (!simTokens.length || !simHolder) { $('simbtn').disabled = true; simBody(el('div', 'oline', 'No demo token is recorded for this deployment.')); return; }
     runSim();
@@ -363,7 +364,9 @@
     const err = $('simerr'), amtIn = $('simamt'), toIn = $('simto');
     err.textContent = ''; amtIn.removeAttribute('aria-invalid'); toIn.removeAttribute('aria-invalid');
     const amtText = amtIn.value.trim(), amt = parseAmount(amtText), to = toIn.value.trim();
-    const rejected = () => simBody(el('div', 'oline', 'Nothing was simulated. Correct the input and run it again.'));
+    const gen = ++simGen, btn = $('simbtn'), out = $('simout');
+    btn.disabled = false; out.classList.remove('busy'); // any older run in flight is now superseded
+    const rejected = () => { $('simblock').textContent = ''; simBody(el('div', 'oline', 'Nothing was simulated. Correct the input and run it again.')); };
     if (amt === null) { amtIn.setAttribute('aria-invalid', 'true'); err.textContent = 'Amount must be a positive number of up to 12 digits, with at most 18 decimal places.'; rejected(); amtIn.focus(); return; }
     if (!ADDR.test(to)) { toIn.setAttribute('aria-invalid', 'true'); err.textContent = 'Recipient must be 0x followed by 40 hex characters.'; rejected(); toIn.focus(); return; }
     const sel = document.querySelector('#simtokens input:checked');
@@ -376,14 +379,15 @@
       return;
     }
     const at = [lastState.url];
-    const btn = $('simbtn'), out = $('simout');
     btn.disabled = true; out.classList.add('busy');
     try {
       const id = await rpc('eth_chainId', [], at);
       if (String(id).toLowerCase() !== SEPOLIA_HEX) throw new Error('wrong chain');
       const block = await rpc('eth_blockNumber', [], at);
+      if (gen !== simGen) return; // a newer run replaced this one
       const data = '0xa9059cbb' + to.slice(2).toLowerCase().padStart(64, '0') + amt.toString(16).padStart(64, '0');
       const res = await callRaw({ from: simHolder, to: t.address, data }, block, at);
+      if (gen !== simGen) return; // a newer run replaced this one
       $('simblock').textContent = 'block ' + Number(BigInt(block)).toLocaleString('en-US');
       $('simhead').textContent = t.symbol + '.transfer(address,uint256)';
       const lines = [];
@@ -419,9 +423,10 @@
       lines.push(v);
       simBody(...lines);
     } catch {
+      if (gen !== simGen) return;
       $('simblock').textContent = '';
       simBody(el('div', 'oline', 'Sepolia did not answer. Nothing was simulated; try again in a moment.'));
-    } finally { btn.disabled = false; out.classList.remove('busy'); }
+    } finally { if (gen === simGen) { btn.disabled = false; out.classList.remove('busy'); } }
   }
 
   // ---------- Networks: the same status on each chain, read from each chain
