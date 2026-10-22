@@ -97,12 +97,14 @@
     latchInfo: '0xa31cbc7b', transfersAllowed: '0xb0660c3d' };
 
   let chainNow = Math.floor(Date.now() / 1000);
-  const fmt = (sec) => new Date(sec * 1000).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
-  const fmtDay = (sec) => new Date(sec * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const fmt = (sec) => new Date(sec * 1000).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false, timeZoneName: 'short' });
+  // The report's as-of day is a UTC date (the workflow's clock), so show it in UTC.
+  const fmtDay = (sec) => new Date(sec * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' });
 
   // ---------- Federal Register titles: display only, never a status source
   const titles = new Map();
   async function loadTitles(docs) {
+    let loaded = 0;
     // Skip documents already loaded or loading; a failed lookup is retried on the next cycle.
     const want = [...new Set(docs)].filter((d) => DOCNUM.test(d) && (!titles.has(d) || titles.get(d) === 'failed'));
     if (!want.length) return false;
@@ -118,10 +120,11 @@
         const ag = Array.isArray(d.agencies) ? d.agencies.slice().reverse().find((a) => a && AGENCY_SHORT[a.slug]) || d.agencies[0] : null;
         const agency = ag ? (AGENCY_SHORT[ag.slug] || (typeof ag.name === 'string' ? ag.name : '')) : '';
         titles.set(d.document_number, { title: d.title.slice(0, 400), type: d.type.slice(0, 40), agency: agency.slice(0, 60) });
+        loaded++;
       }
     } catch { /* fall back to document numbers */ } finally { clearTimeout(t); }
     want.forEach((d) => { if (titles.get(d) === 'pending') titles.set(d, 'failed'); });
-    return true;
+    return loaded > 0; // redraw only when something new can be shown
   }
 
   // ---------- The contract read panel
@@ -277,7 +280,10 @@
       const why = !rules ? 'The rules could not load.' : got && got.error === 'parse' ? 'The Federal Register answered with a shape the parser does not accept, so no explanation is shown.' : 'The Federal Register did not answer just now.';
       row('Explain', el('span', 'm', why + ' The status comes straight from the contract either way.'));
     } else {
-      const e = rules.explain(doc, asOf);
+      let e;
+      try { e = rules.explain(doc, asOf); } catch { e = null; }
+      if (!e) { row('Document', ext('https://www.federalregister.gov/d/' + doc.documentNumber, doc.documentNumber)); row('Explain', el('span', 'm', 'The rules could not explain this document. The status comes straight from the contract either way.')); }
+      else {
       row('Document', ext('https://www.federalregister.gov/d/' + doc.documentNumber, doc.documentNumber), el('span', 'm', ', ' + doc.type.toLowerCase() + ', published ' + fmtIso(doc.publicationDate)));
       row('Agency', e.agencies.length ? e.agencies.map((a) => agencyLabel(a.slug) + (a.watched ? ', watched' : ', not watched')).join('; ') : 'None listed, so it stays in scope.');
       const mine = e.evidence.filter((x) => x.category === key);
@@ -294,6 +300,7 @@
         row('Severity', reason, arrow(), stSpan(STATUS[e.severity]));
         if (STATUS[e.severity] !== r.reported) warn = true;
       } else warn = true;
+      }
     }
     const enforced = [' Enforced ', stSpan(r.status)];
     let why = '';
@@ -342,6 +349,12 @@
     throw lastErr || new Error('no rpc');
   }
   function simBody(...nodes) { $('simbody').replaceChildren(...nodes); }
+  /** Drop any shown or in-flight simulator result: it no longer matches what the page shows. */
+  function invalidateSim(msg) {
+    if (!simSetup || !simTokens.length || !simHolder) return;
+    ++simGen; $('simout').classList.remove('busy'); $('simout').removeAttribute('aria-busy');
+    $('simblock').textContent = ''; simBody(el('div', 'oline', msg));
+  }
   function setupSim(dep) {
     if (simSetup) return; simSetup = true;
     simTokens = (dep.tokens || []).filter((t) => ADDR.test(t.address) && /^[A-Za-z0-9]{1,11}$/.test(t.symbol || ''));
@@ -361,16 +374,17 @@
     runSim();
   }
   async function runSim() {
+    if (!simTokens.length || !simHolder) return; // nothing to simulate against
     const err = $('simerr'), amtIn = $('simamt'), toIn = $('simto');
     err.textContent = ''; amtIn.removeAttribute('aria-invalid'); toIn.removeAttribute('aria-invalid');
     const amtText = amtIn.value.trim(), amt = parseAmount(amtText), to = toIn.value.trim();
-    const gen = ++simGen, btn = $('simbtn'), out = $('simout');
-    btn.disabled = false; out.classList.remove('busy'); // any older run in flight is now superseded
-    const rejected = () => { $('simblock').textContent = ''; simBody(el('div', 'oline', 'Nothing was simulated. Correct the input and run it again.')); };
-    if (amt === null) { amtIn.setAttribute('aria-invalid', 'true'); err.textContent = 'Amount must be a positive number of up to 12 digits, with at most 18 decimal places.'; rejected(); amtIn.focus(); return; }
-    if (!ADDR.test(to)) { toIn.setAttribute('aria-invalid', 'true'); err.textContent = 'Recipient must be 0x followed by 40 hex characters.'; rejected(); toIn.focus(); return; }
+    const gen = ++simGen, out = $('simout');
+    out.classList.remove('busy'); out.removeAttribute('aria-busy'); // any older run in flight is now superseded
     const sel = document.querySelector('#simtokens input:checked');
     const t = simTokens.find((x) => sel && x.address === sel.value) || simTokens[0];
+    const rejected = () => { $('simhead').textContent = t.symbol + '.transfer(address,uint256)'; $('simblock').textContent = ''; simBody(el('div', 'oline', 'Nothing was simulated. Correct the input and run it again.')); };
+    if (amt === null) { amtIn.setAttribute('aria-invalid', 'true'); err.textContent = 'Amount must be a positive number of up to 12 digits, with at most 18 decimal places.'; rejected(); amtIn.focus(); return; }
+    if (!ADDR.test(to)) { toIn.setAttribute('aria-invalid', 'true'); err.textContent = 'Recipient must be 0x followed by 40 hex characters.'; rejected(); toIn.focus(); return; }
     // Only simulate against the RPC this page just verified as Sepolia, and only while
     // the page itself could read the contract. Otherwise say so rather than guess.
     if (!lastState || !lastState.rows || !lastState.url) {
@@ -379,7 +393,7 @@
       return;
     }
     const at = [lastState.url];
-    btn.disabled = true; out.classList.add('busy');
+    out.classList.add('busy'); out.setAttribute('aria-busy', 'true'); // the button stays enabled so keyboard focus is kept
     try {
       const id = await rpc('eth_chainId', [], at);
       if (String(id).toLowerCase() !== SEPOLIA_HEX) throw new Error('wrong chain');
@@ -426,19 +440,23 @@
       if (gen !== simGen) return;
       $('simblock').textContent = '';
       simBody(el('div', 'oline', 'Sepolia did not answer. Nothing was simulated; try again in a moment.'));
-    } finally { if (gen === simGen) { btn.disabled = false; out.classList.remove('busy'); } }
+    } finally { if (gen === simGen) { out.classList.remove('busy'); out.removeAttribute('aria-busy'); } }
   }
 
   // ---------- Networks: the same status on each chain, read from each chain
   async function readChain(gate, urls, chainHex) {
-    const chain = await rpc('eth_chainId', [], urls);
-    if (String(chain).toLowerCase() !== chainHex) throw new Error('wrong chain');
-    const [lastHex, maxHex, blk] = await Promise.all([call(gate, SEL.lastAsOf, urls), call(gate, SEL.maxAge, urls), rpc('eth_getBlockByNumber', ['latest', false], urls)]);
+    // One verified RPC and one block for every read, so results cannot mix nodes or heights.
+    const at = [await pickRpc(urls, chainHex)];
+    const blk = await rpc('eth_getBlockByNumber', ['latest', false], at);
+    if (!blk || !blk.timestamp || !blk.number) throw new Error('no block');
+    const tag = '0x' + BigInt(blk.number).toString(16);
+    const callAt = (to, data) => rpc('eth_call', [{ to, data }, tag], at);
+    const [lastHex, maxHex] = await Promise.all([callAt(gate, SEL.lastAsOf), callAt(gate, SEL.maxAge)]);
     const now = Number(BigInt(blk.timestamp)), lastBig = uint(word(lastHex, 0)), maxBig = uint(word(maxHex, 0));
     if (lastBig > BigInt(now) + 3600n || maxBig === 0n || maxBig > 400n * 86400n) throw new Error('implausible contract values');
     const last = Number(lastBig), maxAge = Number(maxBig);
     const rows = await Promise.all(CATS.map(async (_, i) => {
-      const [s, rep] = await Promise.all([call(gate, SEL.statusOf + arg8(i), urls), call(gate, SEL.reportedStatus + arg8(i), urls)]);
+      const [s, rep] = await Promise.all([callAt(gate, SEL.statusOf + arg8(i)), callAt(gate, SEL.reportedStatus + arg8(i))]);
       const st = Number(uint(word(s, 0))), rs = Number(uint(word(rep, 0)));
       if (!(st in STATUS) || !(rs in STATUS)) throw new Error('bad status value');
       return { status: STATUS[st], reported: STATUS[rs], doc: last ? b32str(word(rep, 1)) : '' };
@@ -525,6 +543,7 @@
       const c = el('div'); c.append(el('div', 'cat', label), el('div', 'cat-sub', sub));
       const d = el('div');
       if (!r) d.append(el('p', 'title quiet', 'Status unreadable. Treat as BLOCK.'));
+      else if (!r.last) d.append(el('p', 'title quiet', 'No report yet. Treat as BLOCK.'));
       else if (!r.doc) d.append(el('p', 'title quiet', r.reported === 'OK' ? 'No matching publication in the window.' : 'No document recorded.'));
       else if (!DOCNUM.test(r.doc)) d.append(el('p', 'title mono', r.doc));
       else {
@@ -589,10 +608,10 @@
   function decodeLog(l) {
     if (!l || !Array.isArray(l.topics) || typeof l.data !== 'string' || !/^0x[0-9a-fA-F]*$/.test(l.data)) return null;
     const t0 = String(l.topics[0]).toLowerCase();
-    const time = l.blockTimestamp ? Number(BigInt(l.blockTimestamp)) : null;
-    const base = { tx: /^0x[0-9a-fA-F]{64}$/.test(l.transactionHash) ? l.transactionHash : null,
-      block: Number(BigInt(l.blockNumber)), index: Number(BigInt(l.logIndex || '0x0')), time };
     try {
+      const time = l.blockTimestamp ? Number(BigInt(l.blockTimestamp)) : null;
+      const base = { tx: /^0x[0-9a-fA-F]{64}$/.test(l.transactionHash) ? l.transactionHash : null,
+        block: Number(BigInt(l.blockNumber)), index: Number(BigInt(l.logIndex || '0x0')), time };
       if (t0 === T_STATUS && l.topics.length >= 2) {
         const sts = [0, 1, 2, 3].map((i) => STATUS[Number(uint(word(l.data, i)))] || 'unknown');
         const okCount = sts.filter((s) => s === 'OK').length;
@@ -611,32 +630,35 @@
     } catch { return null; }
     return null;
   }
-  async function getLogsChunked(filter, from, latest) {
+  async function getLogsChunked(filter, from, latest, at) {
     const out = [];
     for (let f = from; f <= latest; f += LOG_CHUNK) {
       const to = Math.min(f + LOG_CHUNK - 1, latest);
-      const part = await rpc('eth_getLogs', [{ ...filter, fromBlock: '0x' + f.toString(16), toBlock: '0x' + to.toString(16) }]);
+      const part = await rpc('eth_getLogs', [{ ...filter, fromBlock: '0x' + f.toString(16), toBlock: '0x' + to.toString(16) }], at);
       if (!Array.isArray(part)) throw new Error('bad logs');
       out.push(...part.filter((l) => !l.removed));
     }
     return out;
   }
-  async function loadFeed(dep, latest) {
+  let feedGen = 0;
+  async function loadFeed(dep, latest, at) {
+    const gen = ++feedGen;
     const list = $('events');
     try {
       const gate = dep.regGateStatus.toLowerCase();
       const fromBlock = Number(dep.fromBlock);
       const start = Math.max(Number.isInteger(fromBlock) && fromBlock > 0 ? fromBlock : latest - LOG_CHUNK, latest - LOG_CHUNK * LOG_MAX_CHUNKS);
-      const own = (await getLogsChunked({ address: gate, topics: [[T_STATUS, T_LATCHED, T_CLEARED]] }, start, latest))
+      const own = (await getLogsChunked({ address: gate, topics: [[T_STATUS, T_LATCHED, T_CLEARED]] }, start, latest, at))
         .filter((l) => String(l.address).toLowerCase() === gate);
       let fwd = [];
       if (ADDR.test(dep.forwarder || '')) {
         try {
-          fwd = (await getLogsChunked({ address: dep.forwarder, topics: [T_PROCESSED, '0x' + gate.slice(2).padStart(64, '0')] }, start, latest))
+          fwd = (await getLogsChunked({ address: dep.forwarder, topics: [T_PROCESSED, '0x' + gate.slice(2).padStart(64, '0')] }, start, latest, at))
             .filter((l) => String(l.address).toLowerCase() === dep.forwarder.toLowerCase());
         } catch { fwd = []; }
       }
       const events = [...own, ...fwd].map(decodeLog).filter(Boolean).sort((a, b) => b.block - a.block || b.index - a.index).slice(0, 8);
+      if (gen !== feedGen) return; // a newer load replaced this one
       list.replaceChildren();
       if (!events.length) { const li = el('li'); li.append(el('span', 't', 'none yet'), el('span', 'w', 'No reports yet')); list.append(li); return; }
       for (const e of events) {
@@ -647,6 +669,7 @@
         list.append(li);
       }
     } catch {
+      if (gen !== feedGen) return;
       const li = el('li'); li.append(el('span', 't', 'unavailable'), el('span', 'w', 'Events unreadable'), el('span', 'd', 'Statuses above come straight from the contract.'));
       list.replaceChildren(li);
       feedKey = null;
@@ -661,19 +684,28 @@
     if (strong) { const s = el('div'); s.append(el('b', null, strong + ' '), text); a.append(s); }
   }
 
-  let lastSig = null, firstRun = true, lastState = null;
+  let lastSig = null, lastStatusSig = null, firstRun = true, lastState = null, feedTick = 0;
   async function load() {
     let dep;
     try {
       const r = await fetch('deployment.json', { cache: 'no-store' });
-      if (!r.ok) throw new Error('missing');
+      if (r.status === 404) throw new Error('not-deployed');
+      if (!r.ok) throw new Error('status ' + r.status);
       dep = await r.json();
       if (!ADDR.test(dep.regGateStatus)) throw new Error('bad address');
-    } catch {
-      setLive('bad', 'Not deployed');
-      $('read-addr').textContent = 'not deployed';
-      setAlert('Not deployed.', 'Statuses appear once RegGateStatus is live on Sepolia.');
-      renderCalls(null, false); renderBoard(null); runRead(false);
+    } catch (e) {
+      const missing = e && e.message === 'not-deployed';
+      setLive('bad', missing ? 'Not deployed' : 'Configuration unreadable');
+      $('read-addr').textContent = missing ? 'not deployed' : 'unknown';
+      if (missing) setAlert('Not deployed.', 'Statuses appear once RegGateStatus is live on Sepolia.');
+      else setAlert('The page could not load its configuration.', 'Showing UNKNOWN rather than guessing, so treat every transfer as blocked. Retrying every minute.');
+      // Forget everything shown so far, so nothing stale survives and the next good cycle redraws in full.
+      lastState = null; lastSig = null; lastStatusSig = null; feedKey = null; netGen++; feedGen++;
+      renderCalls(null, false); renderTxs(null); renderBoard(null); runRead(false);
+      setMetrics({ notClear: NaN, blocked: NaN, tokens: 0, age: NaN, unit: 'days' });
+      $('networks').hidden = true;
+      $('read-net').textContent = 'eth_call, Sepolia'; $('read-last').textContent = 'last report unknown'; $('read-until').textContent = ''; $('window').textContent = '';
+      invalidateSim('Nothing was simulated. The page could not load its configuration.');
       return;
     }
     const gate = dep.regGateStatus;
@@ -738,23 +770,31 @@
       state = { rows: null, tokens: (dep.tokens || []).filter((t) => ADDR.test(t.address)).map((t) => ({ ...t, allowed: null })) };
       setMetrics({ notClear: NaN, blocked: NaN, tokens: state.tokens.length, age: NaN, unit: 'days' });
       $('read-last').textContent = 'last report unknown'; $('read-until').textContent = '';
+      $('read-net').textContent = 'eth_call, Sepolia'; $('window').textContent = 'status unknown';
     }
 
     lastState = state;
-    const sig = JSON.stringify([state.rows && state.rows.map((r) => [r.status, r.doc, r.latched, r.fresh]), state.tokens.map((t) => t.allowed)]);
+    // Everything any view shows, so a new report with the same statuses still refreshes dates and Why panels.
+    const sig = JSON.stringify([state.last, state.rows && state.rows.map((r) => [r.status, r.reported, r.doc, r.latched, r.latchDoc, r.unreviewed, r.fresh]),
+      state.tokens.map((t) => [t.allowed, t.sim ? t.sim.data : null])]);
+    // What a transfer would do: when this changes, the read animation replays and old simulator results expire.
+    const statusSig = JSON.stringify([state.rows && state.rows.map((r) => [r.status, r.fresh]), state.tokens.map((t) => t.allowed)]);
     const changed = sig !== lastSig; lastSig = sig;
+    const statusChanged = statusSig !== lastStatusSig; lastStatusSig = statusSig;
     if (changed) {
-      renderCalls(state, state.rows != null); renderTxs(state); renderBoard(state);
-      runRead(state.rows != null && (firstRun || changed));
+      renderCalls(state, state.rows != null && (firstRun || statusChanged)); renderTxs(state); renderBoard(state);
+      runRead(state.rows != null && (firstRun || statusChanged));
     }
+    if (statusChanged && !firstRun) invalidateSim('The status changed since the last result. Run it again.');
     firstRun = false;
 
     setupSim(dep);
     loadNetworks(dep, state);
     if (state.rows) {
       loadTitles(state.rows.map((r) => r.doc).filter(Boolean)).then((did) => { if (did && lastState === state) renderBoard(state); });
-      const key = gate + '|' + state.last + '|' + state.rows.map((r) => (r.latched ? 1 : 0)).join('');
-      if (state.latestBlock && key !== feedKey) { feedKey = key; loadFeed(dep, state.latestBlock); }
+      const key = gate + '|' + state.last + '|' + state.rows.map((r) => [r.latched ? 1 : 0, r.latchDoc, r.unreviewed].join(':')).join('|');
+      // Rejected reports change nothing on the contract, so also refresh the list every fifth cycle.
+      if (state.latestBlock && (key !== feedKey || ++feedTick % 5 === 0)) { feedKey = key; loadFeed(dep, state.latestBlock, [state.url]); }
     }
   }
 
