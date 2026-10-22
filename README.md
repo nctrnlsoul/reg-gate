@@ -186,4 +186,6 @@ deployment, and the manual verification log.
 
 ## License
 
-MIT. Built by NorthSchema.
+MIT.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/northschema-mark-white.png"><img src="docs/northschema-mark-black.png" width="18" height="18" alt="" align="top"></picture> Built by NorthSchema.
