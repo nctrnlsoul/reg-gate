@@ -67,7 +67,6 @@
     }
     throw lastErr || new Error('no rpc');
   }
-  const call = (to, data, urls) => rpc('eth_call', [{ to, data }, 'latest'], urls);
   const BASE_SEPOLIA_HEX = '0x14a34';
   const baseOverride = new URLSearchParams(location.search).get('baserpc');
   const BASE_RPCS = baseOverride && LOCAL_RPC.test(baseOverride) ? [baseOverride] : ['https://base-sepolia-rpc.publicnode.com', 'https://sepolia.base.org'];
@@ -389,7 +388,7 @@
     // the page itself could read the contract. Otherwise say so rather than guess.
     if (!lastState || !lastState.rows || !lastState.url) {
       $('simblock').textContent = '';
-      simBody(el('div', 'oline', 'Sepolia is unreadable right now, so nothing was simulated. The page retries every minute.'));
+      simBody(el('div', 'oline', 'The page cannot read the contract right now, so nothing was simulated. It retries every minute.'));
       return;
     }
     const at = [lastState.url];
@@ -702,6 +701,7 @@
       // Forget everything shown so far, so nothing stale survives and the next good cycle redraws in full.
       lastState = null; lastSig = null; lastStatusSig = null; feedKey = null; netGen++; feedGen++;
       renderCalls(null, false); renderTxs(null); renderBoard(null); runRead(false);
+      { const li = el('li'); li.append(el('span', 't', 'unavailable'), el('span', 'w', 'Events unreadable'), el('span', 'd', 'The page could not load its configuration.')); $('events').replaceChildren(li); }
       setMetrics({ notClear: NaN, blocked: NaN, tokens: 0, age: NaN, unit: 'days' });
       $('networks').hidden = true;
       $('read-net').textContent = 'eth_call, Sepolia'; $('read-last').textContent = 'last report unknown'; $('read-until').textContent = ''; $('window').textContent = '';
