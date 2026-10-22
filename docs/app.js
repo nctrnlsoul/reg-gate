@@ -42,7 +42,7 @@
     return s;
   }
 
-  // Optional ?rpc= override for local testing. Only https or localhost.
+  // Optional ?rpc= override for local testing. Localhost only.
   const override = new URLSearchParams(location.search).get('rpc');
   // Local testing only: an override to any public host could show a fake status on the real
   // domain. The CSP blocks localhost in production too, so this only works on a local copy.

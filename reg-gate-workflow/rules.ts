@@ -19,7 +19,7 @@
 // Timing: a final rule BLOCKs when it takes effect, not when it is published.
 // Between publication and its effective date it is REVIEW, so issuers get the
 // notice period the agency gave them. A second query finds rules that take effect
-// inside the window even when they were published months earlier.
+// from the window start to a year ahead, even when published months earlier.
 //
 // Two narrow exclusions, both anchored on type and title so near misses take the
 // normal path: an exchange's own rule filing that the SEC publishes for comment
@@ -232,7 +232,7 @@ export function severityForType(type: string): StatusCode {
 const normType = (doc: FrDocument) => doc.type.trim().toLowerCase()
 
 /**
- * Severity of a matched document as of `asOfDate` (the last finished day).
+ * Severity of a matched document as of `asOfDate` (the run's own date).
  * A final rule that has not taken effect yet is REVIEW; one in effect, or with no
  * effective date at all, is BLOCK.
  */
@@ -410,7 +410,7 @@ const EMPTY: ParsedResponse = { count: 0, documents: [] }
 
 /**
  * @param published documents published inside the window
- * @param takingEffect final rules whose effective date falls inside the window,
+ * @param takingEffect final rules taking effect from the window start to the horizon,
  *   whatever their publication date (the second query)
  */
 export function classify(
@@ -575,7 +575,7 @@ export function buildQueryUrl(baseUrl: string, window: { start: string; end: str
 }
 
 /**
- * Final rules that take effect inside the window, published any time up to the window's
+ * Final rules taking effect from the window start to the horizon, published any time up to the window's
  * last finished day. The publication cap keeps today's still-posting issue out, so every
  * node sees the same documents.
  */

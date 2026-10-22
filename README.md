@@ -78,8 +78,8 @@ all read as `BLOCK`.
 
 | Capability | Where | What it does |
 |---|---|---|
-| Cron trigger | [`workflow.ts#L343`](reg-gate-workflow/workflow.ts#L343) | The heartbeat |
-| EVM log trigger | [`workflow.ts#L350`](reg-gate-workflow/workflow.ts#L350) | `LatchCleared` on either chain, at the safe head. The handler refuses other contracts, other events, and reorged logs ([`L324`](reg-gate-workflow/workflow.ts#L324)) |
+| Cron trigger | [`workflow.ts#L348`](reg-gate-workflow/workflow.ts#L348) | The heartbeat |
+| EVM log trigger | [`workflow.ts#L351`](reg-gate-workflow/workflow.ts#L351) | `LatchCleared` on either chain, at the safe head. The handler refuses other contracts, other events, and reorged logs ([`L324`](reg-gate-workflow/workflow.ts#L324)) |
 | HTTP client + identical consensus | [`workflow.ts#L282`](reg-gate-workflow/workflow.ts#L282) | Both Federal Register queries; nodes must agree byte for byte |
 | DON time | [`workflow.ts#L276`](reg-gate-workflow/workflow.ts#L276) | `runtime.now()` stamps the report, never a node clock |
 | EVM read | [`workflow.ts#L180`](reg-gate-workflow/workflow.ts#L180) | `snapshot()` at latest and finalized, to skip unchanged writes ([`decideWrite`](reg-gate-workflow/workflow.ts#L215)) |
@@ -115,12 +115,12 @@ That report set these statuses:
 
 | Category | Status | Trigger document |
 |---|---|---|
-| Stablecoins | REVIEW | [2026-20729](https://www.federalregister.gov/d/2026-20729) NCUA proposal on credit unions' payment stablecoin activities |
+| Stablecoins | REVIEW | [2026-20729](https://www.federalregister.gov/d/2026-20729) NCUA notice of proposed Call Report changes covering credit unions' payment stablecoin activities |
 | Tokenized securities | REVIEW | [2026-20466](https://www.federalregister.gov/d/2026-20466) SEC proposed crypto custody rules |
 | Digital asset markets | REVIEW | [2026-20888](https://www.federalregister.gov/d/2026-20888) CFTC "Regulation Crypto Asset Transactions and Markets" |
 | AML and sanctions | OK | two FinCEN withdrawals in the window, informational |
 
-So lenient `gUSD` transfers and strict `gAST` is blocked. The status page always shows the
+So lenient `gUSD` can transfer and strict `gAST` is blocked. The status page always shows the
 contract's current state. Check it yourself with `bun deploy/status.ts` (read-only, no key).
 
 ## Fail-closed design

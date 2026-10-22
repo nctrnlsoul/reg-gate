@@ -7,8 +7,8 @@
 //     instead of waiting up to one cron interval.
 //
 // Each check:
-//   1. Each DON node makes two Federal Register queries over a fixed, finished date
-//      window (documents published in it, and final rules taking effect in it) and
+//   1. Each DON node makes two Federal Register queries: documents published in a fixed,
+//      finished window, and final rules taking effect from its start to a year ahead. It
 //      classifies them (regGate.ts, deterministic).
 //   2. Nodes must return byte-identical results (identical consensus). Any
 //      disagreement fails the run, nothing is written, and the contract's
