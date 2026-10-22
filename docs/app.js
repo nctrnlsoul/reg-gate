@@ -363,8 +363,9 @@
     const err = $('simerr'), amtIn = $('simamt'), toIn = $('simto');
     err.textContent = ''; amtIn.removeAttribute('aria-invalid'); toIn.removeAttribute('aria-invalid');
     const amtText = amtIn.value.trim(), amt = parseAmount(amtText), to = toIn.value.trim();
-    if (amt === null) { amtIn.setAttribute('aria-invalid', 'true'); err.textContent = 'Amount must be a number, up to 18 decimal places.'; amtIn.focus(); return; }
-    if (!ADDR.test(to)) { toIn.setAttribute('aria-invalid', 'true'); err.textContent = 'Recipient must be 0x followed by 40 hex characters.'; toIn.focus(); return; }
+    const rejected = () => simBody(el('div', 'oline', 'Nothing was simulated. Correct the input and run it again.'));
+    if (amt === null) { amtIn.setAttribute('aria-invalid', 'true'); err.textContent = 'Amount must be a positive number of up to 12 digits, with at most 18 decimal places.'; rejected(); amtIn.focus(); return; }
+    if (!ADDR.test(to)) { toIn.setAttribute('aria-invalid', 'true'); err.textContent = 'Recipient must be 0x followed by 40 hex characters.'; rejected(); toIn.focus(); return; }
     const sel = document.querySelector('#simtokens input:checked');
     const t = simTokens.find((x) => sel && x.address === sel.value) || simTokens[0];
     // Only simulate against the RPC this page just verified as Sepolia, and only while
