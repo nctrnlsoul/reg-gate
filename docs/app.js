@@ -35,6 +35,8 @@
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
   const ext = (href, text, cls) => { const a = el('a', cls || null, text); a.href = href; a.target = '_blank'; a.rel = 'noopener noreferrer'; return a; };
   const shortAddr = (a) => a.slice(0, 6) + '…' + a.slice(-4);
+  // deployment.json is config, not trusted shape: anything malformed is dropped, never thrown on.
+  const depTokens = (dep) => (Array.isArray(dep && dep.tokens) ? dep.tokens : []).filter((t) => t && typeof t === 'object' && typeof t.address === 'string' && ADDR.test(t.address) && typeof t.category === 'string');
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   const SVGNS = 'http://www.w3.org/2000/svg';
   function svg(view, parts) {
@@ -129,8 +131,12 @@
 
   // ---------- The contract read panel
   /** Whether a demo token can move right now: the real transfer() call when there is one, else transfersAllowed(). */
+  // The transfer() call decides only when it succeeded or the gate itself refused it. Any other
+  // outcome (the demo holder short of balance, an odd return value) says nothing about the gate,
+  // so fall back to transfersAllowed(), the value the board shows.
+  function gateCall(t) { const v = t.sim ? describeCall(t.sim) : null; return v && (v.ok || v.gate) ? v : null; }
   function tokenOpen(t) {
-    const v = t.sim ? describeCall(t.sim) : null;
+    const v = gateCall(t);
     if (v) return v.ok;
     return t.allowed === true ? true : t.allowed === false ? false : null;
   }
@@ -164,7 +170,7 @@
       const st = state.rows && ci >= 0 ? state.rows[ci].status : 'UNKNOWN';
       const at = ci >= 0 ? ' r' + ci : '';
       let line;
-      const v = t.sim ? describeCall(t.sim) : null; // an actual eth_call of transfer(), when available
+      const v = gateCall(t); // an actual eth_call of transfer(), when it speaks for the gate
       if (v && v.ok) { line = el('div', 'tx okay' + at); line.append(el('b', null, t.symbol + '.transfer(…)'), ' ', el('span', null, 'returns'), ' true'); }
       else if (v) { line = el('div', 'tx rev' + at); line.append(el('b', null, t.symbol + '.transfer(…)'), ' ', el('span', null, 'reverts'), ' ' + v.text); }
       else if (t.allowed === true) { line = el('div', 'tx okay' + at); line.append(el('b', null, t.symbol + '.transfersAllowed()'), ' ', el('span', null, 'returns'), ' true'); }
@@ -186,7 +192,7 @@
     const sel = res.data.slice(0, 10).toLowerCase();
     if (sel === '0xf87edc4d' && res.data.length >= 138) {
       const c = Number(uint(res.data.slice(10, 74))), st = STATUS[Number(uint(res.data.slice(74, 138)))] || 'unknown';
-      return { ok: false, text: 'TransferBlockedByRegGate(' + (c < CATS.length ? c : '?') + ', ' + st + ')' };
+      return { ok: false, gate: true, text: 'TransferBlockedByRegGate(' + (c < CATS.length ? c : '?') + ', ' + st + ')' };
     }
     return { ok: false, text: SIM_ERR[sel] ? SIM_ERR[sel] + '()' : '(no reason returned)' };
   }
@@ -293,7 +299,7 @@
     if (!r.doc) {
       row('Window', 'Federal Register publications through ' + fmtIso(reportDay(r.last, -1)) + ', plus final rules taking effect from the window start to a year ahead.');
       if (r.reported === 'OK') row('Match', 'Nothing in scope matched ' + CAT_NAME[key] + '.');
-      else row('Match', el('span', 'm', 'No single document is recorded. Either the result set was larger than one page, so every category was floored at BLOCK, or a document of an unrecognized type matched.'));
+      else row('Match', el('span', 'm', 'No single document is recorded. The result set was larger than one page, so every category was floored at BLOCK rather than trusting a partial list.'));
     } else if (!DOCNUM.test(r.doc)) {
       row('Document', el('span', 'mono', r.doc));
       row('Explain', el('span', 'm', 'The stored value is not a Federal Register document number, so there is nothing to look up. The status comes straight from the contract.'));
@@ -348,7 +354,8 @@
   function parseAmount(v) {
     const m = /^(\d{1,12})(?:\.(\d{1,18}))?$/.exec(v);
     if (!m) return null;
-    return BigInt(m[1]) * 10n ** 18n + BigInt((m[2] || '').padEnd(18, '0'));
+    const wei = BigInt(m[1]) * 10n ** 18n + BigInt((m[2] || '').padEnd(18, '0'));
+    return wei > 0n ? wei : null; // the error text promises a positive amount
   }
   async function callRaw(tx, block, urls) {
     let lastErr;
@@ -373,13 +380,14 @@
   function simBody(...nodes) { $('simbody').replaceChildren(...nodes); }
   /** Drop any shown or in-flight simulator result: it no longer matches what the page shows. */
   function invalidateSim(msg) {
-    if (!simSetup || !simTokens.length || !simHolder) return;
+    if (!simSetup) { simBody(el('div', 'oline', msg)); return; }
+    if (!simTokens.length || !simHolder) return;
     ++simGen; $('simout').classList.remove('busy'); $('simout').removeAttribute('aria-busy');
     $('simblock').textContent = ''; simBody(el('div', 'oline', msg));
   }
   function setupSim(dep) {
     if (simSetup) return; simSetup = true;
-    simTokens = (dep.tokens || []).filter((t) => ADDR.test(t.address) && /^[A-Za-z0-9]{1,11}$/.test(t.symbol || ''));
+    simTokens = depTokens(dep).filter((t) => /^[A-Za-z0-9]{1,11}$/.test(t.symbol || ''));
     simHolder = ADDR.test(dep.demoHolder || '') ? dep.demoHolder : null;
     const fs = $('simtokens');
     const preferred = simTokens.some((t) => t.symbol === 'gAST') ? 'gAST' : simTokens[0] && simTokens[0].symbol;
@@ -471,6 +479,7 @@
     const at = [await pickRpc(urls, chainHex)];
     const blk = await rpc('eth_getBlockByNumber', ['latest', false], at);
     if (!blk || !blk.timestamp || !blk.number) throw new Error('no block');
+    if (!LOCAL_RPC.test(at[0]) && Date.now() / 1000 - Number(BigInt(blk.timestamp)) > NODE_LAG_MAX) throw new Error('rpc node lagging');
     const tag = '0x' + BigInt(blk.number).toString(16);
     const callAt = (to, data) => rpc('eth_call', [{ to, data }, tag], at);
     const [lastHex, maxHex] = await Promise.all([callAt(gate, SEL.lastAsOf), callAt(gate, SEL.maxAge)]);
@@ -670,7 +679,7 @@
     return out;
   }
   let feedGen = 0;
-  async function loadFeed(dep, latest, at) {
+  async function loadFeed(dep, latest, at, lastReport) {
     const gen = ++feedGen;
     const list = $('events');
     try {
@@ -689,7 +698,12 @@
       const events = [...own, ...fwd].map(decodeLog).filter(Boolean).sort((a, b) => b.block - a.block || b.index - a.index).slice(0, 8);
       if (gen !== feedGen) return; // a newer load replaced this one
       list.replaceChildren();
-      if (!events.length) { const li = el('li'); li.append(el('span', 't', 'none yet'), el('span', 'w', 'No reports yet')); list.append(li); return; }
+      if (!events.length) {
+        const li = el('li');
+        if (lastReport) li.append(el('span', 't', 'none recent'), el('span', 'w', 'No recent events'), el('span', 'd', 'The last report, ' + fmt(lastReport) + ', is older than the two weeks this list covers.'));
+        else li.append(el('span', 't', 'none yet'), el('span', 'w', 'No reports yet'));
+        list.append(li); return;
+      }
       for (const e of events) {
         const li = el('li');
         const w = el('span', 'w t-' + e.tone, e.what);
@@ -707,7 +721,11 @@
 
 
   // ---------- Headline: the live result in one plain sentence. Never claims more than the read shows.
-  function setHeadline(head, sub) { $('headline').textContent = head; $('subline').textContent = sub; }
+  function setHeadline(head, sub) {
+    // Written only when it changes, so a screen reader announces a new result once, not every minute.
+    if ($('headline').textContent !== head) $('headline').textContent = head;
+    if ($('subline').textContent !== sub) $('subline').textContent = sub;
+  }
   function headlineFor(state) {
     const rows = state.rows, toks = state.tokens || [];
     const nc = rows.filter((r) => r.status !== 'OK');
@@ -718,7 +736,7 @@
       const one = nc.length === 1;
       const verb = kinds.size === 1 && kinds.has('REVIEW') ? (one ? 'needs review' : 'need review')
         : kinds.size === 1 && kinds.has('BLOCK') ? (one ? 'is blocked' : 'are blocked') : (one ? 'needs attention' : 'need attention');
-      head = nc.length + ' of ' + CATS.length + (one ? ' category ' : ' categories ') + verb + '.';
+      head = nc.length + ' of ' + CATS.length + ' categories ' + verb + '.';
     }
     const parts = toks.map((t) => {
       const ci = CATS.findIndex(([k]) => k === t.category);
@@ -735,12 +753,15 @@
   // ---------- Page state
   function setLive(kind, text) { $('live').className = 'live ' + kind; $('livetext').textContent = text; }
   function setAlert(strong, text) {
-    const a = $('alert'); a.replaceChildren();
+    const a = $('alert'), key = strong ? strong + ' ' + text : '';
+    if (a.dataset.key === key) return; // unchanged: leave it, so it is not re-announced
+    a.dataset.key = key; a.replaceChildren();
     a.hidden = !strong;
     if (strong) { const s = el('div'); s.append(el('b', null, strong + ' '), text); a.append(s); }
   }
 
-  let lastSig = null, lastStatusSig = null, firstRun = true, lastState = null, feedTick = 0;
+  let lastSig = null, lastStatusSig = null, firstRun = true, lastState = null, feedTick = 0, maxBlockSeen = 0;
+  const NODE_LAG_MAX = 30 * 60; // seconds a node's newest block may trail this computer's clock
   async function load() {
     let dep;
     try {
@@ -768,7 +789,7 @@
     }
     const gate = dep.regGateStatus;
     const scan = 'https://sepolia.etherscan.io/address/' + gate;
-    $('nav-contract').href = scan; $('cta-contract').href = scan;
+    for (const id of ['nav-contract', 'cta-contract']) { const a = $(id); a.href = scan; a.target = '_blank'; a.rel = 'noopener noreferrer'; }
     setGateAddrs(dep);
     $('read-addr').textContent = shortAddr(gate);
 
@@ -782,6 +803,11 @@
       if (!block || !block.timestamp || !block.number) throw new Error('no block');
       chainNow = Number(BigInt(block.timestamp));
       const latestBlock = Number(BigInt(block.number));
+      // A load-balanced RPC can hand us a node that is behind. Never present an old block as live:
+      // not one older than the last cycle's, and not one far behind this computer's clock.
+      if (latestBlock < maxBlockSeen) throw new Error('rpc node behind the last read');
+      if (!TEST_RPC && Date.now() / 1000 - chainNow > NODE_LAG_MAX) throw new Error('rpc node lagging');
+      maxBlockSeen = latestBlock;
       const blockTag = '0x' + latestBlock.toString(16);
       const callAt = (to, data) => rpc('eth_call', [{ to, data }, blockTag], at);
       const [lastHex, maxHex] = await Promise.all([callAt(gate, SEL.lastAsOf), callAt(gate, SEL.maxAge)]);
@@ -798,7 +824,7 @@
         return { status: STATUS[st], reported: STATUS[rs], doc: last ? b32str(word(rep, 1)) : '', latched: uint(word(latch, 0)) === 1n,
           latchDoc: b32str(word(latch, 1)), unreviewed: unreviewed > 16n ? 16 : Number(unreviewed), fresh, last };
       }));
-      const tokens = (dep.tokens || []).filter((t) => ADDR.test(t.address)).map((t) => ({ ...t }));
+      const tokens = depTokens(dep).map((t) => ({ ...t }));
       const holder = ADDR.test(dep.demoHolder || '') ? dep.demoHolder : null;
       const probe = '0xa9059cbb' + '0'.repeat(60) + 'beef' + (10n ** 18n).toString(16).padStart(64, '0');
       await Promise.all(tokens.map(async (t) => {
@@ -824,12 +850,12 @@
       const inDays = left >= 2 * 86400;
       const amount = inDays ? Math.floor(left / 86400) : Math.floor(left / 3600);
       setMetrics({ notClear: rows.filter((r) => r.status !== 'OK').length, blocked: tokens.filter((t) => t.allowed !== true).length, tokens: tokens.length,
-        age: amount, unit: inDays ? 'days' : amount === 1 ? 'hour' : 'hours' });
+        age: amount, unit: !last ? 'hours, no report yet' : !fresh ? 'hours, already BLOCK' : inDays ? 'days' : amount === 1 ? 'hour' : 'hours' });
     } catch {
       setLive('bad', 'Sepolia unreadable');
       setAlert('Sepolia is unreachable or returned bad data.', 'Showing UNKNOWN rather than guessing, so treat every transfer as blocked. Retrying every minute.');
       setHeadline('Sepolia cannot be read right now.', 'Every status shows UNKNOWN and every transfer counts as blocked until the chain answers.');
-      state = { rows: null, tokens: (dep.tokens || []).filter((t) => ADDR.test(t.address)).map((t) => ({ ...t, allowed: null })) };
+      state = { rows: null, tokens: depTokens(dep).map((t) => ({ ...t, allowed: null })) };
       setMetrics({ notClear: NaN, blocked: NaN, tokens: state.tokens.length, age: NaN, unit: 'days' });
       $('read-last').textContent = 'last report unknown'; $('read-until').textContent = '';
       $('read-net').textContent = 'Not read'; $('window').textContent = 'status unknown';
@@ -856,10 +882,11 @@
       loadTitles(state.rows.map((r) => r.doc).filter(Boolean)).then((did) => { if (did && lastState === state) renderBoard(state); });
       const key = gate + '|' + state.last + '|' + state.rows.map((r) => [r.latched ? 1 : 0, r.latchDoc, r.unreviewed].join(':')).join('|');
       // Rejected reports change nothing on the contract, so also refresh the list every fifth cycle.
-      if (state.latestBlock && (key !== feedKey || ++feedTick % 5 === 0)) { feedKey = key; loadFeed(dep, state.latestBlock, [state.url]); }
+      if (state.latestBlock && (key !== feedKey || ++feedTick % 5 === 0)) { feedKey = key; loadFeed(dep, state.latestBlock, [state.url], state.last); }
     }
   }
 
+  $('simform').addEventListener('submit', (ev) => ev.preventDefault());
   renderCalls(null, true); renderBoard(null);
   metricsObs.observe(document.querySelector('.metrics'));
   boardObs.observe($('board'));

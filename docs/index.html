@@ -9,22 +9,22 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' https://ethereum-sepolia-rpc.publicnode.com https://sepolia.drpc.org https://base-sepolia-rpc.publicnode.com https://sepolia.base.org https://www.federalregister.gov; img-src 'self' data:; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="preload" href="fonts/PublicSans-Variable.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="app.css?v=7a2f051b">
 </head>
 <body>
 <nav><div class="wrap">
   <a class="logo" href="#top"><svg viewBox="0 0 64 64" aria-hidden="true"><polygon points="6,18 26,6 26,38 6,50" fill="#0E1726"/><polygon points="22,22 42,10 42,42 22,54" fill="#33456A"/><polygon points="38,26 58,14 58,46 38,58" fill="#4392E6"/></svg>Reg-Gate</a>
-  <div class="links"><a href="#status">Status</a><a href="#workflow">Workflow</a><a href="#simulate">Simulate</a><a href="#networks">Networks</a><a href="#integrate">Integrate</a><a id="nav-contract" href="#" target="_blank" rel="noopener noreferrer">Contract</a><a href="https://github.com/nctrnlsoul/reg-gate" target="_blank" rel="noopener noreferrer">Source</a><a href="Reg-Gate-Deck.pdf" target="_blank" rel="noopener noreferrer">Deck</a></div>
+  <div class="links"><a href="#status">Status</a><a href="#workflow">Workflow</a><a href="#simulate">Simulate</a><a href="#networks">Networks</a><a href="#integrate">Integrate</a><a id="nav-contract" href="#integrate">Contract</a><a href="https://github.com/nctrnlsoul/reg-gate" target="_blank" rel="noopener noreferrer">Source</a><a href="Reg-Gate-Deck.pdf" target="_blank" rel="noopener noreferrer">Deck</a></div>
   <span class="live" id="live"><i></i><span id="livetext">Connecting</span></span>
 </div></nav>
 
 <header class="band" id="top"><div class="wrap band-in">
   <div class="band-l">
     <p class="kicker"><b>Reg-Gate</b><span>RegGateStatus <span class="mono" id="read-addr">reading</span></span></p>
-    <h1 id="headline">Reading the contract.</h1>
-    <p class="subline" id="subline">Statuses appear as soon as Sepolia answers.</p>
+    <h1 id="headline" aria-live="polite">Reading the contract.</h1>
+    <p class="subline" id="subline" aria-live="polite">Statuses appear as soon as Sepolia answers.</p>
     <p class="purpose">Tokenized assets that check the Federal Register before they move. A Chainlink CRE workflow sorts new federal rules into four asset categories and writes a status for each on-chain. Silence counts as BLOCK.</p>
-    <div class="ctas"><a class="btn primary" id="cta-contract" href="#" target="_blank" rel="noopener noreferrer">View contract</a><a class="btn ghost" href="https://github.com/nctrnlsoul/reg-gate" target="_blank" rel="noopener noreferrer">Source on GitHub</a></div>
+    <div class="ctas"><a class="btn primary" id="cta-contract" href="#integrate">View contract</a><a class="btn ghost" href="https://github.com/nctrnlsoul/reg-gate" target="_blank" rel="noopener noreferrer">Source on GitHub</a></div>
   </div>
   <section class="read" id="read" aria-label="Live read of the RegGateStatus contract">
     <div class="read-top"><b>Status on Sepolia</b><span class="net" id="read-net">reading</span></div>
@@ -41,7 +41,7 @@
     <div class="metric"><div class="mlabel">Until silence reads BLOCK</div><div class="num"><span id="m3">…</span><small id="m3s"> days</small></div></div>
     <div class="metric"><div class="mlabel">Tests, every planted bug caught</div><div class="num"><span id="m4">171</span><small> passed</small></div></div>
   </section>
-  <div class="alert" id="alert" hidden></div>
+  <div class="alert" id="alert" role="status" hidden></div>
 
   <section class="section" id="status">
     <div class="sh"><h2>Categories</h2><p id="window">reading the contract</p></div>
@@ -93,7 +93,7 @@
     <div class="integ">
       <div class="code">
         <div class="chead"><span>Solidity</span><button class="copy" id="copy" type="button">Copy</button></div>
-<pre id="snippet"><span class="k">interface</span> <span class="t">IRegGate</span> {
+<pre id="snippet" tabindex="0" aria-label="Solidity excerpt from GatedToken.sol"><span class="k">interface</span> <span class="t">IRegGate</span> {
     <span class="k">function</span> <span class="f">statusOf</span>(<span class="t">uint8</span> category) <span class="k">external view returns</span> (<span class="t">uint8</span>);
     <span class="k">function</span> <span class="f">isAllowed</span>(<span class="t">uint8</span> category, <span class="t">bool</span> strict) <span class="k">external view returns</span> (<span class="t">bool</span>);
 }
@@ -125,6 +125,6 @@
 
 <footer><div class="wrap"><span>Testnet demo: reports are written by the CRE workflow simulator through Chainlink's simulation forwarder. Flags federal publications for human review. Not legal advice.</span><span class="maker"><img src="northschema-mark-black.png" width="16" height="16" alt="">Built by NorthSchema</span><a href="https://github.com/nctrnlsoul/reg-gate" target="_blank" rel="noopener noreferrer">MIT licensed source</a></div></footer>
 
-<script src="app.js" defer></script>
+<script src="app.js?v=cfd1f0a6" defer></script>
 </body>
 </html>
