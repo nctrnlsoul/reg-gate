@@ -1,7 +1,7 @@
 {
   "network": "sepolia",
   "chainId": 11155111,
-  "deployedAt": "2026-10-20T20:31:42.854Z",
+  "deployedAt": "2026-10-26T06:37:29.484Z",
   "deployer": "0xECDD02BFa99E9C102455E9DE286a9Ae6b7049942",
   "forwarder": "0x15fC6ae953E024d975e77382eEeC56A9101f9F88",
   "maxAgeSeconds": 604800,
@@ -9,23 +9,23 @@
   "simulation": true,
   "expectedAuthor": "0x0000000000000000000000000000000000000000",
   "regGateStatus": {
-    "address": "0x7a69df6b68752e9e6377eb144dda7fbb594f7d9a",
-    "tx": "0x516c312ddbbb1fd142f8d086850d862ffdee4022143c6dac29cd249395c0ded3"
+    "address": "0xac08a1c39ed1c327dfa9d177a35170f878520670",
+    "tx": "0xd562a40f8b18fff3e24822da857cdfa89945ed84859e5be09e61f788150bb7f1"
   },
   "tokens": [
     {
       "symbol": "gUSD",
       "category": "STABLECOINS",
       "strict": false,
-      "address": "0xc2bb916e02130f9461ad47a4011b5e31a189df7b",
-      "tx": "0x939bdbdc41afc63cf4d0ae82165beac9085beb782cca2bbde4bb5bc5f6ef990c"
+      "address": "0xfacc2bb8d3e25979efed49ccc3a9d4a659800210",
+      "tx": "0xc004566fd60659f8f12cd1cdcf028749fd195799f5cf8a453acd78313e2cea9b"
     },
     {
       "symbol": "gAST",
       "category": "DIGITAL_ASSET_MARKETS",
       "strict": true,
-      "address": "0xc3aedef662a6437a8f16a67c567bdbe56cf29cda",
-      "tx": "0xf3a243eb77d5f4c876cd243aff75754f9da6eb7eaff75ac3e4e2e908f808fd2c"
+      "address": "0x27ca455da6fc3d89e6dff5e6a5c2212d826f3c24",
+      "tx": "0x1c20acf63ac13530ceebca70b1d9bc8906a4b7b8845c6e864a991463fa40b374"
     }
   ]
 }
