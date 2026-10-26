@@ -127,17 +127,31 @@
   }
 
   // ---------- The contract read panel
+  /** Whether a demo token can move right now: the real transfer() call when there is one, else transfersAllowed(). */
+  function tokenOpen(t) {
+    const v = t.sim ? describeCall(t.sim) : null;
+    if (v) return v.ok;
+    return t.allowed === true ? true : t.allowed === false ? false : null;
+  }
   function renderCalls(state, animate) {
     const root = $('calls'); root.replaceChildren();
-    CATS.forEach(([key], i) => {
+    CATS.forEach(([key, label], i) => {
       const r = state && state.rows ? state.rows[i] : null;
-      const row = el('div', 'call');
-      const fn = el('span', 'fn'); fn.append('statusOf(', el('em', null, key), ')');
       const status = r ? r.status : 'UNKNOWN';
+      const row = el('div', 'call r' + i + ' s-' + status);
+      // Signal head: one lamp per aspect, top to bottom BLOCK, REVIEW, OK. A dark head means UNKNOWN.
+      const head = el('span', 'head'); head.setAttribute('aria-hidden', 'true');
+      for (const s of ['BLOCK', 'REVIEW', 'OK']) head.append(el('i', 'l-' + s + (s === status ? ' on' : '')));
+      const nm = el('span', 'nm'); nm.append(el('b', null, label));
+      const fn = el('span', 'fn'); fn.append('statusOf(', el('em', null, key), ')'); nm.append(fn);
       const val = el('span', 'val t-' + status + (animate ? ' pending' : ''), status);
       val.dataset.final = status;
-      const doc = el('span', 'doc', r ? (r.doc ? r.doc : r.fresh ? 'none' : 'stale') : '');
-      row.append(fn, val, doc);
+      const doc = el('span', 'doc', r ? (r.doc ? (DOCNUM.test(r.doc) ? 'FR Doc. ' + r.doc : r.doc) : r.fresh ? 'no document' : 'stale') : '');
+      const tok = state && state.tokens ? state.tokens.find((t) => t.category === key) : null;
+      const open = tok ? tokenOpen(tok) : null;
+      const rail = el('span', 'rail' + (tok ? (open === true ? ' lit' : ' cut') : ''));
+      rail.setAttribute('aria-hidden', 'true');
+      row.append(head, nm, val, doc, rail);
       root.append(row);
     });
   }
@@ -147,13 +161,21 @@
     for (const t of state.tokens) {
       const ci = CATS.findIndex(([k]) => k === t.category);
       const st = state.rows && ci >= 0 ? state.rows[ci].status : 'UNKNOWN';
+      const at = ci >= 0 ? ' r' + ci : '';
       let line;
       const v = t.sim ? describeCall(t.sim) : null; // an actual eth_call of transfer(), when available
-      if (v && v.ok) { line = el('div', 'tx okay'); line.append(el('b', null, t.symbol + '.transfer(…)'), ' ', el('span', null, 'returns'), ' true'); }
-      else if (v) { line = el('div', 'tx rev'); line.append(el('b', null, t.symbol + '.transfer(…)'), ' ', el('span', null, 'reverts'), ' ' + v.text); }
-      else if (t.allowed === true) { line = el('div', 'tx okay'); line.append(el('b', null, t.symbol + '.transfersAllowed()'), ' ', el('span', null, 'returns'), ' true'); }
-      else if (t.allowed === false) { line = el('div', 'tx rev'); line.append(el('b', null, t.symbol + '.transfersAllowed()'), ' ', el('span', null, 'returns'), ' false, ' + (st || 'BLOCK')); }
-      else { line = el('div', 'tx'); line.append(el('b', null, t.symbol + '.transfer(…)'), ' ', el('span', null, 'unknown, treat as blocked')); }
+      if (v && v.ok) { line = el('div', 'tx okay' + at); line.append(el('b', null, t.symbol + '.transfer(…)'), ' ', el('span', null, 'returns'), ' true'); }
+      else if (v) { line = el('div', 'tx rev' + at); line.append(el('b', null, t.symbol + '.transfer(…)'), ' ', el('span', null, 'reverts'), ' ' + v.text); }
+      else if (t.allowed === true) { line = el('div', 'tx okay' + at); line.append(el('b', null, t.symbol + '.transfersAllowed()'), ' ', el('span', null, 'returns'), ' true'); }
+      else if (t.allowed === false) { line = el('div', 'tx rev' + at); line.append(el('b', null, t.symbol + '.transfersAllowed()'), ' ', el('span', null, 'returns'), ' false, ' + (st || 'BLOCK')); }
+      else { line = el('div', 'tx' + at); line.append(el('b', null, t.symbol + '.transfer(…)'), ' ', el('span', null, 'unknown, treat as blocked')); }
+      // Plain result first; the actual call it came from underneath, smaller.
+      const okay = line.classList.contains('okay'), rev = line.classList.contains('rev');
+      const call = el('span', 'callt'); call.append(...line.childNodes);
+      const msg = el('span', 'msg');
+      msg.append(el('b', null, t.symbol + ' '), el('span', 'plain', okay ? 'transfers go through' : rev ? 'transfers are blocked' : 'unknown, treated as blocked'), call);
+      const gate = gateSvg(); gate.classList.add('gate', line.classList.contains('okay') ? 'up' : 'down');
+      line.append(gate, msg);
       root.append(line);
     }
   }
@@ -208,9 +230,9 @@
   }
   function setMetrics(m) {
     pendingMetrics = m;
-    $('m1s').textContent = '/ ' + CATS.length;
-    $('m2s').textContent = '/ ' + (m.tokens || 0);
-    $('m3s').textContent = m.unit;
+    $('m1s').textContent = ' of ' + CATS.length;
+    $('m2s').textContent = ' of ' + (m.tokens || 0);
+    $('m3s').textContent = ' ' + m.unit;
     const show = (v) => (Number.isFinite(v) ? String(v) : '?');
     if (metricsShown) { $('m1').textContent = show(m.notClear); $('m2').textContent = show(m.blocked); $('m3').textContent = show(m.age); }
     else tryShowMetrics();
@@ -538,7 +560,7 @@
     CATS.forEach(([key, label, sub], i) => {
       const r = state && state.rows ? state.rows[i] : null;
       const status = r ? r.status : 'UNKNOWN';
-      const lane = el('div', 'lane');
+      const lane = el('div', 'lane s-' + status);
       const c = el('div'); c.append(el('div', 'cat', label), el('div', 'cat-sub', sub));
       const d = el('div');
       if (!r) d.append(el('p', 'title quiet', 'Status unreadable. Treat as BLOCK.'));
@@ -675,6 +697,33 @@
     }
   }
 
+
+  // ---------- Headline: the live result in one plain sentence. Never claims more than the read shows.
+  function setHeadline(head, sub) { $('headline').textContent = head; $('subline').textContent = sub; }
+  function headlineFor(state) {
+    const rows = state.rows, toks = state.tokens || [];
+    const nc = rows.filter((r) => r.status !== 'OK');
+    let head;
+    if (!nc.length) head = 'All ' + CATS.length + ' categories are clear.';
+    else {
+      const kinds = new Set(nc.map((r) => r.status));
+      const one = nc.length === 1;
+      const verb = kinds.size === 1 && kinds.has('REVIEW') ? (one ? 'needs review' : 'need review')
+        : kinds.size === 1 && kinds.has('BLOCK') ? (one ? 'is blocked' : 'are blocked') : (one ? 'needs attention' : 'need attention');
+      head = nc.length + ' of ' + CATS.length + (one ? ' category ' : ' categories ') + verb + '.';
+    }
+    const parts = toks.map((t) => {
+      const ci = CATS.findIndex(([k]) => k === t.category);
+      const open = tokenOpen(t);
+      const cat = ci >= 0 ? CATS[ci][1].toLowerCase() : 'its category';
+      const st = ci >= 0 ? rows[ci].status : 'UNKNOWN';
+      if (open === true) return t.symbol + ' can still move.';
+      if (open === false) return t.symbol + ' transfers are blocked while ' + cat + ' reads ' + st + '.';
+      return t.symbol + ' could not be checked, so treat it as blocked.';
+    });
+    return [head, parts.join(' ') || 'No demo tokens are configured.'];
+  }
+
   // ---------- Page state
   function setLive(kind, text) { $('live').className = 'live ' + kind; $('livetext').textContent = text; }
   function setAlert(strong, text) {
@@ -704,8 +753,9 @@
       { const li = el('li'); li.append(el('span', 't', 'unavailable'), el('span', 'w', 'Events unreadable'), el('span', 'd', 'The page could not load its configuration.')); $('events').replaceChildren(li); }
       setMetrics({ notClear: NaN, blocked: NaN, tokens: 0, age: NaN, unit: 'days' });
       $('networks').hidden = true;
-      $('read-net').textContent = 'eth_call, Sepolia'; $('read-last').textContent = 'last report unknown'; $('read-until').textContent = ''; $('window').textContent = '';
+      $('read-net').textContent = 'Not read'; $('read-last').textContent = 'last report unknown'; $('read-until').textContent = ''; $('window').textContent = '';
       invalidateSim('Nothing was simulated. The page could not load its configuration.');
+      setHeadline(missing ? 'Not deployed yet.' : 'The page could not load its configuration.', 'Every transfer counts as blocked until it loads. Retrying every minute.');
       return;
     }
     const gate = dep.regGateStatus;
@@ -754,7 +804,10 @@
       else if (!last) { setLive('bad', 'No report yet'); setAlert('No report yet.', 'Every category reads BLOCK until the workflow writes its first report.'); }
       else if (!fresh) { setLive('bad', 'Stale on Sepolia'); setAlert('Stale, so every transfer is blocked.', 'No fresh report arrived within the freshness limit. That is the fail-closed design working: silence blocks transfers.'); }
       else { setLive('ok', 'Live on Sepolia'); setAlert(null); }
-      $('read-net').textContent = latestBlock ? 'eth_call, block ' + latestBlock.toLocaleString('en-US') : 'eth_call, Sepolia';
+      if (!last) setHeadline('No report yet.', 'Every category reads BLOCK until the workflow writes its first report.');
+      else if (!fresh) setHeadline('The report is stale, so every transfer is blocked.', 'No fresh report arrived in time. Silence blocks, by design.');
+      else { const [h, sub] = headlineFor(state); setHeadline(h, sub); }
+      $('read-net').textContent = latestBlock ? 'Read at block ' + latestBlock.toLocaleString('en-US') : 'Read from Sepolia';
       $('read-last').textContent = last ? 'last report ' + fmt(last) : 'no report yet';
       $('read-until').textContent = last ? (fresh ? 'fresh until ' : 'stale since ') + fmt(last + maxAge) : '';
       $('window').textContent = last ? 'report of ' + fmtDay(last) + (fresh ? '' : ', stale') : 'no report yet';
@@ -767,10 +820,11 @@
     } catch {
       setLive('bad', 'Sepolia unreadable');
       setAlert('Sepolia is unreachable or returned bad data.', 'Showing UNKNOWN rather than guessing, so treat every transfer as blocked. Retrying every minute.');
+      setHeadline('Sepolia cannot be read right now.', 'Every status shows UNKNOWN and every transfer counts as blocked until the chain answers.');
       state = { rows: null, tokens: (dep.tokens || []).filter((t) => ADDR.test(t.address)).map((t) => ({ ...t, allowed: null })) };
       setMetrics({ notClear: NaN, blocked: NaN, tokens: state.tokens.length, age: NaN, unit: 'days' });
       $('read-last').textContent = 'last report unknown'; $('read-until').textContent = '';
-      $('read-net').textContent = 'eth_call, Sepolia'; $('window').textContent = 'status unknown';
+      $('read-net').textContent = 'Not read'; $('window').textContent = 'status unknown';
     }
 
     lastState = state;

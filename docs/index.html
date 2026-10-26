@@ -5,59 +5,74 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Reg-Gate</title>
 <meta name="description" content="Tokenized assets that check the Federal Register before they move. A Chainlink CRE workflow writes a fail-closed regulatory status on-chain.">
-<meta name="color-scheme" content="dark">
+<meta name="color-scheme" content="light">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' https://ethereum-sepolia-rpc.publicnode.com https://sepolia.drpc.org https://base-sepolia-rpc.publicnode.com https://sepolia.base.org https://www.federalregister.gov; img-src 'self' data:; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
-<link rel="preload" href="fonts/Geist-Variable.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/PublicSans-Variable.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
-<svg class="grain" aria-hidden="true"><filter id="grain"><feTurbulence type="fractalNoise" baseFrequency=".9" numOctaves="3" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#grain)"/></svg>
-
 <nav><div class="wrap">
-  <a class="logo" href="#top"><svg viewBox="0 0 64 64" aria-hidden="true"><polygon points="6,18 26,6 26,38 6,50" fill="#DCE3EE"/><polygon points="22,22 42,10 42,42 22,54" fill="#8A9BB8"/><polygon points="38,26 58,14 58,46 38,58" fill="#4392E6"/></svg>Reg-Gate</a>
-  <div class="links"><a href="#status">Status</a><a href="#simulate">Simulate</a><a href="#networks">Networks</a><a href="#integrate">Integrate</a><a id="nav-contract" href="#" target="_blank" rel="noopener noreferrer">Contract</a><a href="https://github.com/nctrnlsoul/reg-gate" target="_blank" rel="noopener noreferrer">Source</a><a href="Reg-Gate-Deck.pdf" target="_blank" rel="noopener noreferrer">Deck</a></div>
+  <a class="logo" href="#top"><svg viewBox="0 0 64 64" aria-hidden="true"><polygon points="6,18 26,6 26,38 6,50" fill="#0E1726"/><polygon points="22,22 42,10 42,42 22,54" fill="#33456A"/><polygon points="38,26 58,14 58,46 38,58" fill="#4392E6"/></svg>Reg-Gate</a>
+  <div class="links"><a href="#status">Status</a><a href="#workflow">Workflow</a><a href="#simulate">Simulate</a><a href="#networks">Networks</a><a href="#integrate">Integrate</a><a id="nav-contract" href="#" target="_blank" rel="noopener noreferrer">Contract</a><a href="https://github.com/nctrnlsoul/reg-gate" target="_blank" rel="noopener noreferrer">Source</a><a href="Reg-Gate-Deck.pdf" target="_blank" rel="noopener noreferrer">Deck</a></div>
   <span class="live" id="live"><i></i><span id="livetext">Connecting</span></span>
 </div></nav>
 
-<main class="wrap" id="top">
-  <section class="hero">
-    <div>
-      <p class="kicker"><b>Chainlink CRE</b><span></span>Federal Register<span></span>Ethereum Sepolia and Base Sepolia</p>
-      <h1>Tokenized assets that check the Federal Register before they move.</h1>
-      <p class="lede">New U.S. federal rules are classified into four asset categories and written on-chain as a fail-closed status. Token transfers read it first.</p>
-      <div class="ctas"><a class="btn primary" id="cta-contract" href="#" target="_blank" rel="noopener noreferrer">View contract</a><a class="btn ghost" href="https://github.com/nctrnlsoul/reg-gate" target="_blank" rel="noopener noreferrer">Source on GitHub</a></div>
-    </div>
-
-    <div class="read" id="read" aria-label="Live read of the RegGateStatus contract">
-      <div class="read-top"><b>RegGateStatus</b><span id="read-addr">reading</span><span class="net" id="read-net">eth_call, Sepolia</span></div>
-      <div class="calls" id="calls"></div>
-      <div id="txs"></div>
-      <div class="read-foot"><span id="read-last">last report</span><span id="read-until"></span></div>
-    </div>
+<header class="band" id="top"><div class="wrap band-in">
+  <div class="band-l">
+    <p class="kicker"><b>Reg-Gate</b><span>RegGateStatus <span class="mono" id="read-addr">reading</span></span></p>
+    <h1 id="headline">Reading the contract.</h1>
+    <p class="subline" id="subline">Statuses appear as soon as Sepolia answers.</p>
+    <p class="purpose">Tokenized assets that check the Federal Register before they move. A Chainlink CRE workflow sorts new federal rules into four asset categories and writes a status for each on-chain. Silence counts as BLOCK.</p>
+    <div class="ctas"><a class="btn primary" id="cta-contract" href="#" target="_blank" rel="noopener noreferrer">View contract</a><a class="btn ghost" href="https://github.com/nctrnlsoul/reg-gate" target="_blank" rel="noopener noreferrer">Source on GitHub</a></div>
+  </div>
+  <section class="read" id="read" aria-label="Live read of the RegGateStatus contract">
+    <div class="read-top"><b>Status on Sepolia</b><span class="net" id="read-net">reading</span></div>
+    <div class="calls" id="calls"></div>
+    <div class="txs" id="txs"></div>
+    <div class="read-foot"><span id="read-last">last report</span><span id="read-until"></span></div>
   </section>
+</div></header>
 
+<main class="wrap">
   <section class="metrics" aria-label="Key numbers">
-    <div class="metric"><div class="num"><span id="m1">…</span><small id="m1s">/ 4</small></div><div class="mlabel">Categories not clear</div></div>
-    <div class="metric"><div class="num"><span id="m2">…</span><small id="m2s">/ 2</small></div><div class="mlabel">Demo tokens blocked</div></div>
-    <div class="metric"><div class="num"><span id="m3">…</span><small id="m3s">days</small></div><div class="mlabel">Until silence reads BLOCK</div></div>
-    <div class="metric"><div class="num"><span id="m4">171</span></div><div class="mlabel">Tests, every planted bug caught</div></div>
+    <div class="metric"><div class="mlabel">Categories needing attention</div><div class="num"><span id="m1">…</span><small id="m1s"> of 4</small></div></div>
+    <div class="metric"><div class="mlabel">Demo tokens blocked</div><div class="num"><span id="m2">…</span><small id="m2s"> of 2</small></div></div>
+    <div class="metric"><div class="mlabel">Until silence reads BLOCK</div><div class="num"><span id="m3">…</span><small id="m3s"> days</small></div></div>
+    <div class="metric"><div class="mlabel">Tests, every planted bug caught</div><div class="num"><span id="m4">171</span><small> passed</small></div></div>
   </section>
+  <div class="alert" id="alert" hidden></div>
 
   <section class="section" id="status">
-    <div class="sh"><h2>Status by category</h2><p id="window">reading the contract</p></div>
-    <div class="alert" id="alert" hidden></div>
+    <div class="sh"><h2>Categories</h2><p id="window">reading the contract</p></div>
     <div class="board" id="board"></div>
   </section>
 
+  <section class="section" id="workflow">
+    <div class="sh"><h2>CRE workflow</h2><p>The Chainlink capabilities Reg-Gate calls, each linked to the line that calls it.</p></div>
+    <table class="cre">
+      <thead><tr><th scope="col">Capability</th><th scope="col">In Reg-Gate</th><th scope="col">Source</th><th scope="col">Reference</th></tr></thead>
+      <tbody>
+        <tr><td class="cap"><b>Cron trigger</b><code>CronCapability.trigger</code></td><td class="use">Runs the full check every six hours, schedule <code>0 0 */6 * * *</code>.</td><td class="ln"><a href="https://github.com/nctrnlsoul/reg-gate/blob/7d1af040d59bef5cc51133305a4976f749311e98/reg-gate-workflow/workflow.ts#L348" target="_blank" rel="noopener noreferrer">workflow.ts:348</a></td><td class="dl"><a href="https://docs.chain.link/cre/reference/sdk/triggers/cron-trigger-ts" target="_blank" rel="noopener noreferrer">CRE docs</a></td></tr>
+        <tr><td class="cap"><b>EVM log trigger</b><code>EVMClient.logTrigger</code></td><td class="use">A reviewer clearing a latch emits <code>LatchCleared</code>, and the check runs again at once. One listener per chain, at SAFE confidence.</td><td class="ln"><a href="https://github.com/nctrnlsoul/reg-gate/blob/7d1af040d59bef5cc51133305a4976f749311e98/reg-gate-workflow/workflow.ts#L351" target="_blank" rel="noopener noreferrer">workflow.ts:351</a></td><td class="dl"><a href="https://docs.chain.link/cre/reference/sdk/triggers/evm-log-trigger-ts" target="_blank" rel="noopener noreferrer">CRE docs</a></td></tr>
+        <tr><td class="cap"><b>HTTP client</b><code>HTTPClient.sendRequest</code></td><td class="use">Each node queries the Federal Register for documents published and taking effect, then classifies them into the four categories.</td><td class="ln"><a href="https://github.com/nctrnlsoul/reg-gate/blob/7d1af040d59bef5cc51133305a4976f749311e98/reg-gate-workflow/workflow.ts#L284" target="_blank" rel="noopener noreferrer">workflow.ts:284</a></td><td class="dl"><a href="https://docs.chain.link/cre/reference/sdk/http-client-ts" target="_blank" rel="noopener noreferrer">CRE docs</a></td></tr>
+        <tr><td class="cap"><b>Consensus</b><code>consensusIdenticalAggregation</code></td><td class="use">Signing goes ahead only when a quorum of nodes returns the exact same classified result.</td><td class="ln"><a href="https://github.com/nctrnlsoul/reg-gate/blob/7d1af040d59bef5cc51133305a4976f749311e98/reg-gate-workflow/workflow.ts#L284" target="_blank" rel="noopener noreferrer">workflow.ts:284</a></td><td class="dl"><a href="https://docs.chain.link/cre/reference/sdk/consensus-ts" target="_blank" rel="noopener noreferrer">CRE docs</a></td></tr>
+        <tr><td class="cap"><b>EVM read</b><code>EVMClient.callContract</code></td><td class="use">Reads <code>snapshot()</code> at the latest and the finalized block. An unchanged status skips the write; an unreadable chain always writes.</td><td class="ln"><a href="https://github.com/nctrnlsoul/reg-gate/blob/7d1af040d59bef5cc51133305a4976f749311e98/reg-gate-workflow/workflow.ts#L183" target="_blank" rel="noopener noreferrer">workflow.ts:183</a></td><td class="dl"><a href="https://docs.chain.link/cre/reference/sdk/evm-client-ts" target="_blank" rel="noopener noreferrer">CRE docs</a></td></tr>
+        <tr><td class="cap"><b>Signed report</b><code>runtime.report</code></td><td class="use">Signs the encoded result. The chain ID sits inside the payload, so a report cannot be replayed on the other chain.</td><td class="ln"><a href="https://github.com/nctrnlsoul/reg-gate/blob/7d1af040d59bef5cc51133305a4976f749311e98/reg-gate-workflow/workflow.ts#L254" target="_blank" rel="noopener noreferrer">workflow.ts:254</a></td><td class="dl"><a href="https://docs.chain.link/cre/guides/workflow/using-evm-client/onchain-write/overview-ts" target="_blank" rel="noopener noreferrer">CRE docs</a></td></tr>
+        <tr><td class="cap"><b>EVM write</b><code>EVMClient.writeReport</code></td><td class="use">Delivers the signed report through the forwarder to <code>RegGateStatus</code> on Ethereum Sepolia and Base Sepolia.</td><td class="ln"><a href="https://github.com/nctrnlsoul/reg-gate/blob/7d1af040d59bef5cc51133305a4976f749311e98/reg-gate-workflow/workflow.ts#L256" target="_blank" rel="noopener noreferrer">workflow.ts:256</a></td><td class="dl"><a href="https://docs.chain.link/cre/guides/workflow/using-evm-client/onchain-write/overview-ts" target="_blank" rel="noopener noreferrer">CRE docs</a></td></tr>
+      </tbody>
+    </table>
+    <p class="crefoot"><span><b>Built on Chainlink CRE.</b> The reports on this page were broadcast with <code>cre workflow simulate --broadcast</code> through Chainlink's simulation forwarder.</span><a href="https://docs.chain.link/cre/guides/operations/simulating-workflows" target="_blank" rel="noopener noreferrer">Simulating workflows</a></p>
+  </section>
+
   <section class="section" id="simulate">
-    <div class="sh"><h2>Simulate a transfer</h2><p>eth_call on Sepolia. Nothing is signed or sent.</p></div>
+    <div class="sh"><h2>Simulate a transfer</h2><p>A read-only call on Sepolia. Nothing is signed or sent.</p></div>
     <div class="sim">
       <form class="panel" id="simform" novalidate>
         <fieldset class="seg" id="simtokens"><legend class="legend">Token</legend></fieldset>
         <label class="field"><span>Amount</span><input id="simamt" name="amount" inputmode="decimal" autocomplete="off" value="100" aria-describedby="simerr"></label>
         <label class="field"><span>Recipient</span><input id="simto" name="to" autocomplete="off" spellcheck="false" value="0x000000000000000000000000000000000000bEEF" aria-describedby="simerr"></label>
-        <button class="simbtn" id="simbtn" type="submit">Run eth_call</button>
+        <button class="simbtn" id="simbtn" type="submit">Simulate transfer</button>
         <p class="ferr" id="simerr" role="alert"></p>
       </form>
       <div class="panel out" id="simout" aria-live="polite">
@@ -68,7 +83,7 @@
   </section>
 
   <section class="section" id="networks" hidden>
-    <div class="sh"><h2>One result, two chains</h2><p>Each report carries its own chain ID</p></div>
+    <div class="sh"><h2>One result, two chains</h2><p>Each report carries its own chain ID.</p></div>
     <div class="nets" id="nets"></div>
     <p class="sync" id="sync"></p>
   </section>
@@ -107,7 +122,7 @@
   </section>
 </main>
 
-<footer><div class="wrap"><span>Testnet demo: reports are written by the CRE workflow simulator through Chainlink's simulation forwarder. Flags federal publications for human review. Not legal advice.</span><span class="maker"><img src="northschema-mark-white.png" width="16" height="16" alt="">Built by NorthSchema</span><a href="https://github.com/nctrnlsoul/reg-gate" target="_blank" rel="noopener noreferrer">MIT licensed source</a></div></footer>
+<footer><div class="wrap"><span>Testnet demo: reports are written by the CRE workflow simulator through Chainlink's simulation forwarder. Flags federal publications for human review. Not legal advice.</span><span class="maker"><img src="northschema-mark-black.png" width="16" height="16" alt="">Built by NorthSchema</span><a href="https://github.com/nctrnlsoul/reg-gate" target="_blank" rel="noopener noreferrer">MIT licensed source</a></div></footer>
 
 <script src="app.js" defer></script>
 </body>
