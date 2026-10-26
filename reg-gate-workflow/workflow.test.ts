@@ -40,6 +40,9 @@ describe('configSchema (reject bad config before anything runs)', () => {
 	})
 	test('rejects out-of-range numbers and unknown keys', () => {
 		expect(configSchema.safeParse({ ...base, lookbackDays: 0 }).success).toBe(false)
+		// Shorter than the contract's 14-day gap rule would leave a smaller gap unseen and unflagged.
+		expect(configSchema.safeParse({ ...base, lookbackDays: 13 }).success).toBe(false)
+		expect(configSchema.safeParse({ ...base, lookbackDays: 14 }).success).toBe(true)
 		expect(configSchema.safeParse({ ...base, perPage: 500 }).success).toBe(false)
 		expect(configSchema.safeParse({ ...base, gasLimit: '0' }).success).toBe(false)
 		expect(configSchema.safeParse({ ...base, extra: true }).success).toBe(false)

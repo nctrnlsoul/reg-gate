@@ -6,14 +6,14 @@
   "chainSelectorName": "ethereum-testnet-sepolia",
   "isTestnet": true,
   "receiverAddress": "0x7a69df6b68752e9e6377eb144dda7fbb594f7d9a",
-  "gasLimit": "1000000",
+  "gasLimit": "2500000",
   "heartbeatHours": 24,
   "mirrors": [
     {
       "chainSelectorName": "ethereum-testnet-sepolia-base-1",
       "isTestnet": true,
       "receiverAddress": "0x328c1c98b499485eaa499b3e3747a971a849dad9",
-      "gasLimit": "1000000"
+      "gasLimit": "2500000"
     }
   ]
 }

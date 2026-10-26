@@ -15,12 +15,18 @@ interface IReceiver is IERC165 {
 /// @dev Fail-closed by construction:
 ///      - No report yet, or the last report is older than `maxAge`: BLOCK.
 ///      - Every blocking document needs its own human review. A report lists every
-///        document at BLOCK in each category. While any of them is unreviewed the
-///        category is latched at BLOCK, even if later reports say OK. Clearing one
-///        document latches the next unreviewed one straight away.
+///        document at BLOCK in each category, and each unreviewed one joins a review
+///        queue that later reports cannot shorten: a document stays queued until a
+///        reviewer clears it, even after it leaves the workflow's search window. While
+///        the queue is not empty the category is latched at BLOCK, even if later reports
+///        say OK. Clearing one document latches the next straight away.
 ///      - When every listed document has been reviewed, BLOCK reads as REVIEW, never OK.
-///      - BLOCK with no document (unknown type, or a result set we could not see whole)
-///        reads BLOCK until a report says otherwise.
+///      - BLOCK with no document latches on the empty document, and the category stays
+///        BLOCK, even after that clear, until a report stops saying BLOCK.
+///      - A report arriving more than MAX_REPORT_GAP after the previous one means the
+///        workflow could not see part of that time. Every category then queues
+///        COVERAGE_GAP, so a reviewer has to sign off on the blind spot before any
+///        category can read OK again.
 ///      Reports are accepted only from the Chainlink forwarder, from the pinned workflow
 ///      owner, for this chain, with a strictly increasing timestamp. A contract deployed
 ///      in simulation mode (the CRE simulation forwarder, which checks no DON signatures)
@@ -32,6 +38,14 @@ contract RegGateStatus is IReceiver {
     uint8 public constant BLOCK = 2;
     uint8 public constant NUM_CATEGORIES = 4; // STABLECOINS, TOKENIZED_SECURITIES, DIGITAL_ASSET_MARKETS, AML_SANCTIONS
     uint256 public constant MAX_BLOCK_DOCS = 16;
+    /// @notice Most unreviewed documents one category may queue. A report that would exceed it
+    ///         is rejected, so the chain goes stale and reads BLOCK rather than dropping one.
+    uint256 public constant MAX_PENDING = 64;
+    /// @notice Longest time between reports the workflow's 14-day search window can cover.
+    uint64 public constant MAX_REPORT_GAP = 14 days;
+    /// @notice Queued in every category after a gap longer than MAX_REPORT_GAP. Never marked reviewed,
+    ///         so a later gap queues it again.
+    bytes32 public constant COVERAGE_GAP = bytes32("COVERAGE-GAP");
 
     /// @dev How far ahead of block time a report's asOf may be. Reports carry DON
     ///      consensus time, which is at or slightly after the block that includes them.
@@ -55,9 +69,13 @@ contract RegGateStatus is IReceiver {
     mapping(uint8 => mapping(bytes32 => bool)) private _reviewed;
     bool[NUM_CATEGORIES] private _latched;
     bytes32[NUM_CATEGORIES] private _latchedDoc;
+    /// @dev Unreviewed blocking documents, oldest first. Only a reviewer's clear removes one.
+    mapping(uint8 => bytes32[]) private _pending;
+    mapping(uint8 => mapping(bytes32 => bool)) private _queued;
 
     event StatusUpdated(uint64 indexed asOf, uint8[NUM_CATEGORIES] statuses, bytes32[NUM_CATEGORIES] triggerDocs);
     event Latched(uint8 indexed category, bytes32 documentNumber);
+    event Queued(uint8 indexed category, bytes32 documentNumber);
     event LatchCleared(uint8 indexed category, bytes32 documentNumber, address indexed by);
     event ExpectedAuthorSet(address author);
     event ReviewerSet(address reviewer);
@@ -81,6 +99,7 @@ contract RegGateStatus is IReceiver {
     error InvalidCategory(uint8 category);
     error NotLatched(uint8 category);
     error LatchedDocMismatch(bytes32 latchedDoc);
+    error ReviewQueueFull(uint8 category);
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
@@ -145,6 +164,7 @@ contract RegGateStatus is IReceiver {
         if (asOf <= lastAsOf) revert StaleOrReplayed(asOf, lastAsOf);
         if (asOf > block.timestamp + MAX_FUTURE_SKEW) revert FutureReport(asOf);
 
+        bool coverageGap = lastAsOf != 0 && asOf > lastAsOf + MAX_REPORT_GAP;
         for (uint8 i = 0; i < NUM_CATEGORIES; i++) {
             if (statuses[i] > BLOCK) revert InvalidStatus(i, statuses[i]);
             delete _blockDocs[i];
@@ -155,6 +175,11 @@ contract RegGateStatus is IReceiver {
             // A listed document must be non-empty and belong to a category reported at BLOCK.
             if (blockDocs[j] == bytes32(0) || statuses[c] != BLOCK) revert InvalidReport();
             _blockDocs[c].push(blockDocs[j]);
+            _enqueue(c, blockDocs[j]);
+        }
+
+        if (coverageGap) {
+            for (uint8 i = 0; i < NUM_CATEGORIES; i++) _enqueue(i, COVERAGE_GAP);
         }
 
         lastAsOf = asOf;
@@ -162,7 +187,7 @@ contract RegGateStatus is IReceiver {
         _triggerDoc = docs;
 
         for (uint8 i = 0; i < NUM_CATEGORIES; i++) {
-            if (statuses[i] == BLOCK && !_latched[i]) _latchNext(i, true);
+            if (!_latched[i] && (statuses[i] == BLOCK || _pending[i].length > 0)) _latchNext(i, statuses[i] == BLOCK);
         }
 
         emit StatusUpdated(asOf, statuses, docs);
@@ -178,10 +203,14 @@ contract RegGateStatus is IReceiver {
         if (doc != expectedDoc) revert LatchedDocMismatch(doc);
         _latched[category] = false;
         delete _latchedDoc[category];
-        if (doc != bytes32(0)) _reviewed[category][doc] = true;
+        if (doc != bytes32(0)) {
+            if (doc != COVERAGE_GAP) _reviewed[category][doc] = true;
+            _dequeue(category, doc);
+        }
         emit LatchCleared(category, doc, msg.sender);
-        // Any other blocking document in the last report still needs its own review.
-        if (_reported[category] == BLOCK) _latchNext(category, false);
+        // Every other queued document still needs its own review, even if the latest
+        // report no longer lists it (it may have left the workflow's search window).
+        _latchNext(category, false);
     }
 
     function setExpectedAuthor(address author) external onlyOwner {
@@ -214,18 +243,35 @@ contract RegGateStatus is IReceiver {
     ///      document latches on the empty document, but only from a new report
     ///      (`fromReport`), so clearing it does not immediately re-latch.
     function _latchNext(uint8 category, bool fromReport) private {
-        bytes32[] storage list = _blockDocs[category];
-        uint256 len = list.length;
-        if (len == 0) {
-            if (fromReport) _latch(category, bytes32(0));
+        bytes32[] storage queue = _pending[category];
+        if (queue.length > 0) {
+            _latch(category, queue[0]); // oldest first; everything queued is unreviewed
             return;
         }
+        if (fromReport && _blockDocs[category].length == 0) _latch(category, bytes32(0));
+    }
+
+    /// @dev Queue a blocking document for review once. Reviewed documents never return.
+    function _enqueue(uint8 category, bytes32 doc) private {
+        if (_reviewed[category][doc] || _queued[category][doc]) return;
+        if (_pending[category].length >= MAX_PENDING) revert ReviewQueueFull(category);
+        _queued[category][doc] = true;
+        _pending[category].push(doc);
+        emit Queued(category, doc);
+    }
+
+    /// @dev Remove a reviewed document, keeping the rest in arrival order.
+    function _dequeue(uint8 category, bytes32 doc) private {
+        bytes32[] storage queue = _pending[category];
+        uint256 len = queue.length;
         for (uint256 j = 0; j < len; j++) {
-            if (!_reviewed[category][list[j]]) {
-                _latch(category, list[j]);
-                return;
+            if (queue[j] == doc) {
+                for (uint256 k = j; k + 1 < len; k++) queue[k] = queue[k + 1];
+                queue.pop();
+                break;
             }
         }
+        _queued[category][doc] = false;
     }
 
     function _latch(uint8 category, bytes32 doc) private {
@@ -241,13 +287,12 @@ contract RegGateStatus is IReceiver {
         _checkCategory(category);
         if (lastAsOf == 0 || block.timestamp > uint256(lastAsOf) + maxAge) return BLOCK;
         if (_latched[category]) return BLOCK;
+        // Every unreviewed blocking document is queued (see _enqueue), so an empty queue
+        // means every listed document was reviewed. Checked here even without the latch.
+        if (_pending[category].length > 0) return BLOCK;
         uint8 reported = _reported[category];
         if (reported != BLOCK) return reported;
-        bytes32[] storage list = _blockDocs[category];
-        if (list.length == 0) return BLOCK;
-        for (uint256 j = 0; j < list.length; j++) {
-            if (!_reviewed[category][list[j]]) return BLOCK;
-        }
+        if (_blockDocs[category].length == 0) return BLOCK;
         return REVIEW; // every blocking document was reviewed by a human
     }
 
@@ -264,14 +309,16 @@ contract RegGateStatus is IReceiver {
 
     /// @return latched whether the category is held at BLOCK for review
     /// @return latchedDoc the document waiting for review (zero for a BLOCK with no document)
-    /// @return unreviewed how many listed blocking documents are not yet reviewed
+    /// @return unreviewed how many blocking documents are queued for review, listed or not
     function latchInfo(uint8 category) external view returns (bool latched, bytes32 latchedDoc, uint256 unreviewed) {
         _checkCategory(category);
-        bytes32[] storage list = _blockDocs[category];
-        for (uint256 j = 0; j < list.length; j++) {
-            if (!_reviewed[category][list[j]]) unreviewed++;
-        }
-        return (_latched[category], _latchedDoc[category], unreviewed);
+        return (_latched[category], _latchedDoc[category], _pending[category].length);
+    }
+
+    /// @notice Documents waiting for review in a category, oldest first. The first is latched.
+    function reviewQueue(uint8 category) external view returns (bytes32[] memory) {
+        _checkCategory(category);
+        return _pending[category];
     }
 
     function isReviewed(uint8 category, bytes32 doc) external view returns (bool) {

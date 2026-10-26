@@ -48,12 +48,14 @@ export interface FrDocument {
 	publicationDate: string // YYYY-MM-DD
 	effectiveOn: string // YYYY-MM-DD, '' when the API gave none
 	abstract: string
+	excerpts: string // the API's search-hit snippets of body text, tags stripped; '' when none
 	agencySlugs: string[] // '' when the API gave no slug
 }
 
 export interface ParsedResponse {
 	count: number
 	documents: FrDocument[]
+	duplicates: number // repeated document numbers within this one response (an API fault)
 }
 
 export interface GateResult {
@@ -66,7 +68,8 @@ export interface GateResult {
 	matched: number
 	ignored: number
 	informational: number // SRO filings and withdrawn proposals: seen, counted, not escalated
-	truncated: boolean
+	truncated: boolean // the API returned fewer documents than it counted, or repeated one
+	overflow: boolean // more blocking documents than one report can list
 }
 
 // Agencies whose publications can move a category. Slugs verified against
@@ -88,27 +91,29 @@ export const WATCHED_AGENCIES = new Set<string>([
 
 const AML_AGENCIES = new Set<string>(['financial-crimes-enforcement-network', 'foreign-assets-control-office'])
 
-const STABLECOIN_TERMS = [/\bstablecoins?\b/, /\bgenius act\b/]
+// Patterns allow hyphens and spacing variants ("digital-asset", "stable coin") and common word forms.
+const STABLECOIN_TERMS = [/\bstable[\s-]?coins?\b/, /\bgenius act\b/]
 const TOKENIZED_TERMS = [
-	/\btokeni[sz](ed|ation)\b/,
-	/\bcrypto asset investment contracts?\b/,
+	/\btokeni[sz](e|es|ed|ing|ation|ations)\b/,
+	/\bcrypto[\s-]?asset investment contracts?\b/,
 	/\bsecurity tokens?\b/,
-	/\bdigital asset securit(y|ies)\b/,
+	/\bdigital[\s-]+asset securit(y|ies)\b/,
 ]
 // "Regulation Crypto" names both the SEC's securities proposal and the CFTC's
 // commodity-market proposal. It means tokenized securities only from the SEC.
 const SEC_ONLY_TOKENIZED_TERMS = [/\bregulation crypto\b/]
 const SEC = 'securities-and-exchange-commission'
 const DIGITAL_ASSET_TERMS = [
-	/\bdigital assets?\b/,
+	/\bdigital[\s-]+assets?\b/,
 	/\bcrypto\b/,
-	/\bcrypto[- ]assets?\b/,
-	/\bcryptocurrenc(y|ies)\b/,
-	/\bvirtual currenc(y|ies)\b/,
+	/\bcrypto[\s-]?assets?\b/,
+	/\bcrypto[\s-]?currenc(y|ies)\b/,
+	/\bvirtual[\s-]+currenc(y|ies)\b/,
+	/\bvirtual[\s-]+assets?\b/,
 	/\bbitcoin\b/,
-	/\bblockchain\b/,
-	/\bdistributed ledger\b/,
-	/\bdecentralized finance\b/,
+	/\bblock[\s-]?chains?\b/,
+	/\bdistributed[\s-]+ledgers?\b/,
+	/\bdecentralized[\s-]+finance\b/,
 	/\bdefi\b/,
 ]
 const AML_TERMS = [
@@ -126,7 +131,7 @@ const PROCEDURAL_TITLES = [/^agenda$/, /\bunified agenda\b/, /\bregulatory agend
 // Federal Register search terms used to pull candidates. Broad on purpose:
 // the classifier above decides relevance, the query only narrows the payload.
 export const SEARCH_TERM =
-	'stablecoin | stablecoins | "digital asset" | "digital assets" | crypto | cryptocurrency | "virtual currency" | bitcoin | tokenized | tokenization | blockchain | "distributed ledger"'
+	'stablecoin | stablecoins | "stable coin" | "digital asset" | "digital assets" | crypto | cryptocurrency | "crypto asset" | "crypto assets" | "virtual currency" | "virtual asset" | "virtual assets" | bitcoin | tokenized | tokenization | tokenizing | blockchain | "distributed ledger"'
 
 export const FIELDS = [
 	'document_number',
@@ -135,6 +140,7 @@ export const FIELDS = [
 	'publication_date',
 	'effective_on',
 	'abstract',
+	'excerpts',
 	'agencies',
 ] as const
 
@@ -143,13 +149,17 @@ export const FIELDS = [
 const SRO_TITLE = /^self-regulatory organizations;/
 // An agency withdrawing a proposal it published earlier: "...; Withdrawal".
 const WITHDRAWAL_TITLE = /;\s*withdrawal\.?$/
-// FINRA rule filings bind broker-dealers, so they are not treated as informational.
-const FINRA = /\bfinancial industry regulatory authority\b/
-// Withdrawing an exemption or relief tightens obligations, so it is not informational.
-const RELIEF = /\bexempt(ion|ions|ive)?\b|\brelief\b/
+// FINRA and MSRB rule filings bind dealers, so they are not treated as informational.
+const FINRA = /\bfinancial industry regulatory authority\b|\bmunicipal securities rulemaking board\b/
+// An SEC order approving a filing, or a filing effective on filing, is in force, not a proposal.
+const SRO_IN_FORCE = /\border (approving|granting)\b|\bimmediate effectiveness\b|\beffective upon filing\b/
+// Withdrawing an exemption, relief or a safe harbor tightens obligations, so it is not informational.
+const RELIEF = /\bexempt(ion|ions|ive)?\b|\brelief\b|\bsafe harbors?\b/
 
 // At most this many blocking documents in one report (the contract enforces the same cap).
 export const MAX_BLOCK_DOCS = 16
+// Listed instead of documents a report cannot show: "INCOMPLETE-<run date>". A reviewer must clear it.
+export const INCOMPLETE_PREFIX = 'INCOMPLETE-'
 // How far ahead the pending-rule query looks for final rules not yet in effect.
 export const EFFECTIVE_HORIZON_DAYS = 366
 
@@ -176,7 +186,7 @@ export function parseFederalRegisterResponse(body: string): ParsedResponse {
 	// The API omits `results` entirely when nothing matched.
 	if (obj.results === undefined) {
 		if (obj.count !== 0) throw new Error('FR response missing results with nonzero count')
-		return { count: 0, documents: [] }
+		return { count: 0, documents: [], duplicates: 0 }
 	}
 	if (!Array.isArray(obj.results)) throw new Error('FR results is not an array')
 
@@ -196,6 +206,9 @@ export function parseFederalRegisterResponse(body: string): ParsedResponse {
 		if (r.abstract !== null && r.abstract !== undefined && typeof r.abstract !== 'string') {
 			throw new Error(`FR result ${i} has bad abstract`)
 		}
+		if (r.excerpts !== null && r.excerpts !== undefined && typeof r.excerpts !== 'string') {
+			throw new Error(`FR result ${i} has bad excerpts`)
+		}
 		if (!Array.isArray(r.agencies)) throw new Error(`FR result ${i} missing agencies`)
 		const agencySlugs = r.agencies.map((a, j) => {
 			if (typeof a !== 'object' || a === null) throw new Error(`FR result ${i} agency ${j} is not an object`)
@@ -209,10 +222,37 @@ export function parseFederalRegisterResponse(body: string): ParsedResponse {
 			publicationDate: r.publication_date,
 			effectiveOn: typeof eff === 'string' ? eff : '',
 			abstract: typeof r.abstract === 'string' ? r.abstract : '',
+			excerpts: typeof r.excerpts === 'string' ? cleanExcerpt(r.excerpts) : '',
 			agencySlugs,
 		}
 	})
-	return { count: obj.count, documents }
+	// A repeated document number within one response means the page is not what it claims.
+	// Keep the first copy and report the repeat, so classify() treats the result as incomplete.
+	const seen = new Set<string>()
+	const unique: FrDocument[] = []
+	let duplicates = 0
+	for (const d of documents) {
+		if (seen.has(d.documentNumber)) duplicates++
+		else {
+			seen.add(d.documentNumber)
+			unique.push(d)
+		}
+	}
+	return { count: obj.count, documents: unique, duplicates }
+}
+
+/** The API marks hits with HTML and keeps line breaks; match on plain, single-spaced text. */
+export function cleanExcerpt(s: string): string {
+	return s
+		.replace(/<[^>]*>/g, ' ')
+		.replace(/&nbsp;|&#160;/g, ' ')
+		.replace(/&quot;/g, '"')
+		.replace(/&#39;|&apos;/g, "'")
+		.replace(/&lt;/g, '<')
+		.replace(/&gt;/g, '>')
+		.replace(/&amp;/g, '&')
+		.replace(/\s+/g, ' ')
+		.trim()
 }
 
 /** Severity a matched document carries. Unknown types fail closed to BLOCK. */
@@ -254,7 +294,12 @@ export function informationalReason(doc: FrDocument): 'sro-filing' | 'withdrawn-
 		doc.agencySlugs.length > 0 &&
 		doc.agencySlugs.every((s) => s === SEC) &&
 		SRO_TITLE.test(title) &&
-		!FINRA.test(title)
+		!FINRA.test(title) &&
+		!SRO_IN_FORCE.test(title) &&
+		// An exchange filing about tokenized securities is the category itself, not background.
+		// Same test as categoriesFor: the SEC is the only agency here, so its own terms count too.
+		!anyMatch(TOKENIZED_TERMS, `${title} ${doc.abstract} ${doc.excerpts}`.toLowerCase()) &&
+		!anyMatch(SEC_ONLY_TOKENIZED_TERMS, `${title} ${doc.abstract} ${doc.excerpts}`.toLowerCase())
 	) {
 		return 'sro-filing'
 	}
@@ -264,7 +309,7 @@ export function informationalReason(doc: FrDocument): 'sro-filing' | 'withdrawn-
 
 /** Which categories a document touches. Empty means not relevant. */
 export function categoriesFor(doc: FrDocument): Category[] {
-	const text = `${doc.title} ${doc.abstract}`.toLowerCase()
+	const text = `${doc.title} ${doc.abstract} ${doc.excerpts}`.toLowerCase()
 	const isStablecoin = anyMatch(STABLECOIN_TERMS, text)
 	const isTokenized =
 		anyMatch(TOKENIZED_TERMS, text) || (doc.agencySlugs.includes(SEC) && anyMatch(SEC_ONLY_TOKENIZED_TERMS, text))
@@ -303,7 +348,7 @@ export function isProcedural(doc: FrDocument): boolean {
 export interface Evidence {
 	category: Category
 	term: string // the text that matched, as written in the document (lowercased)
-	field: 'title' | 'abstract' | 'agency'
+	field: 'title' | 'abstract' | 'excerpt' | 'agency'
 	note?: string // why this match counts, when it needs saying
 }
 
@@ -321,12 +366,13 @@ export interface Explanation {
 }
 
 /** First pattern that matches the combined text, and which field it fell in. */
-function firstMatch(patterns: RegExp[], doc: FrDocument): { term: string; field: 'title' | 'abstract' } | null {
+function firstMatch(patterns: RegExp[], doc: FrDocument): { term: string; field: 'title' | 'abstract' | 'excerpt' } | null {
 	const title = doc.title.toLowerCase()
-	const text = `${title} ${doc.abstract.toLowerCase()}`
+	const abstract = doc.abstract.toLowerCase()
+	const text = `${title} ${abstract} ${doc.excerpts.toLowerCase()}`
 	for (const p of patterns) {
 		const m = new RegExp(p.source, p.flags.replace('g', '')).exec(text)
-		if (m) return { term: m[0], field: m.index < title.length ? 'title' : 'abstract' }
+		if (m) return { term: m[0], field: m.index < title.length ? 'title' : m.index <= title.length + abstract.length ? 'abstract' : 'excerpt' }
 	}
 	return null
 }
@@ -406,7 +452,7 @@ const moreRecent = (a: FrDocument, b: FrDocument, asOfDate: string) => {
 	return ea !== eb ? ea > eb : a.documentNumber > b.documentNumber
 }
 
-const EMPTY: ParsedResponse = { count: 0, documents: [] }
+const EMPTY: ParsedResponse = { count: 0, documents: [], duplicates: 0 }
 
 /**
  * @param published documents published inside the window
@@ -424,6 +470,7 @@ export function classify(
 	const statuses: StatusCode[] = CATEGORIES.map(() => Status.OK)
 	const triggers: (FrDocument | null)[] = CATEGORIES.map(() => null)
 	const blocking: FrDocument[][] = CATEGORIES.map(() => [])
+	const placeholderTrigger: string[] = CATEGORIES.map(() => '')
 	let matched = 0
 	let ignored = 0
 	let informational = 0
@@ -489,32 +536,44 @@ export function classify(
 			.sort((a, b) => (moreRecent(a, b, asOfDate) ? -1 : moreRecent(b, a, asOfDate) ? 1 : 0))
 			.map((d) => d.documentNumber),
 	)
-	const total = blockDocs.reduce((n, l) => n + l.length, 0)
-	if (total > MAX_BLOCK_DOCS) {
-		// A partial list could let an unlisted document escape review. Write nothing;
-		// the contract's staleness rule turns that silence into BLOCK.
-		throw new Error(`${total} blocking documents exceed the report cap of ${MAX_BLOCK_DOCS}`)
-	}
+	// A result set larger than one page: we cannot vouch for what we did not see, and an
+	// unseen document could be a final rule in effect. A response that repeats a document,
+	// or lists more documents than it counted, is faulty, so it counts as truncated too.
+	const faulty = (r: ParsedResponse) => r.count !== r.documents.length || r.duplicates > 0
+	const truncated = faulty(published) || faulty(takingEffect)
 
-	// A result set larger than one page: we cannot vouch for what we did not see,
-	// and an unseen document could be a final rule in effect. Floor at BLOCK.
-	const truncated =
-		published.count > published.documents.length || takingEffect.count > takingEffect.documents.length
-	if (truncated) {
-		for (let i = 0; i < statuses.length; i++) statuses[i] = Status.BLOCK
+	// A category we cannot describe completely is BLOCK and lists a dated placeholder, so a
+	// reviewer must sign off on the gap itself. Every category when the result was truncated;
+	// otherwise only the categories whose documents do not fit in one report.
+	const incomplete = CATEGORIES.map(() => truncated)
+	const size = () => blockDocs.reduce((n, l, i) => n + l.length + (incomplete[i] ? 1 : 0), 0)
+	while (size() > MAX_BLOCK_DOCS) {
+		let c = 0
+		for (let i = 1; i < blockDocs.length; i++) if (blockDocs[i].length > blockDocs[c].length) c = i
+		incomplete[c] = true
+		blockDocs[c].pop() // the oldest; the placeholder keeps the category held until reviewed
 	}
+	const overflow = !truncated && incomplete.some(Boolean)
+	const placeholder = INCOMPLETE_PREFIX + asOfDate
+	incomplete.forEach((on, i) => {
+		if (!on) return
+		statuses[i] = Status.BLOCK
+		blockDocs[i].unshift(placeholder)
+		if (!triggers[i]) placeholderTrigger[i] = placeholder
+	})
 
 	return {
 		windowStart,
 		windowEnd,
 		asOfDate,
 		statuses,
-		triggerDocs: triggers.map((d) => (d ? d.documentNumber : '')),
+		triggerDocs: triggers.map((d, i) => (d ? d.documentNumber : placeholderTrigger[i])),
 		blockDocs,
 		matched,
 		ignored,
 		informational,
 		truncated,
+		overflow,
 	}
 }
 
@@ -606,6 +665,7 @@ export function serializeResult(r: GateResult): string {
 		ignored: r.ignored,
 		informational: r.informational,
 		truncated: r.truncated,
+		overflow: r.overflow,
 	})
 }
 
@@ -627,6 +687,7 @@ export function deserializeResult(s: string): GateResult {
 		total += list.length
 	})
 	if (total > MAX_BLOCK_DOCS) throw new Error('too many blockDocs')
+	if (typeof r.truncated !== 'boolean' || typeof r.overflow !== 'boolean') throw new Error('bad completeness flags')
 	return r
 }
 
@@ -635,5 +696,5 @@ export function summarize(r: GateResult): string {
 		(c, i) => `${c}=${STATUS_NAMES[r.statuses[i]]}${r.triggerDocs[i] ? ` (${r.triggerDocs[i]})` : ''}`,
 	)
 	const blocking = r.blockDocs.reduce((n, l) => n + l.length, 0)
-	return `window ${r.windowStart}..${r.windowEnd} asOf=${r.asOfDate} blocking=${blocking} matched=${r.matched} ignored=${r.ignored} informational=${r.informational} truncated=${r.truncated} | ${lines.join(' ')}`
+	return `window ${r.windowStart}..${r.windowEnd} asOf=${r.asOfDate} blocking=${blocking} matched=${r.matched} ignored=${r.ignored} informational=${r.informational} truncated=${r.truncated} overflow=${r.overflow} | ${lines.join(' ')}`
 }

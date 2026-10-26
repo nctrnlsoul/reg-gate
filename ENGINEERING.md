@@ -18,9 +18,10 @@ verified.
 | An exchange's own rule filing that the SEC publishes for comment (SRO notice), except FINRA | informational |
 | An agency withdrawing its own proposal, unless it withdraws an exemption or relief | informational |
 | Anything else | `BLOCK` (unknown fails closed) |
-| More results than one page holds, on either query | every category `BLOCK` |
+| More results than one page holds, on either query, or a faulty response | every category `BLOCK`, plus a dated `INCOMPLETE` entry |
 
-A final rule blocks when it takes effect, not when it is published, so issuers get the
+The classifier reads the title, the abstract, and the excerpts the Federal Register returns
+around each body match of the search term. A final rule blocks when it takes effect, not when it is published, so issuers get the
 notice period the agency gave them. Informational documents are counted in every run's log
 but never move a status: neither kind puts a new obligation on an issuer. The type must match
 exactly. The title must match an anchored pattern: the SRO prefix at the start, "; Withdrawal"
@@ -32,11 +33,18 @@ effective date falls between the window start and a year ahead, published no lat
 yesterday. Today's issue can still be posting, so leaving it out keeps every node on the same
 documents. A rule published today is picked up tomorrow.
 
-**Per-document review.** The report lists every document at `BLOCK`, not only the newest (at
-most 16; more than that writes nothing, because a partial list could let one escape review).
-While any listed document is unreviewed, the category is latched at `BLOCK`, even if later
-reports say `OK`. Clearing one document latches the next unreviewed one straight away. When
-every listed document has been reviewed, `BLOCK` reads as `REVIEW`.
+**Per-document review.** The report lists every document at `BLOCK`, not only the newest. A
+report holds at most 16; when there are more, the newest are listed and the category also gets
+a dated `INCOMPLETE` entry, so a reviewer signs off on the documents left out. Every listed
+document joins that category's review queue on-chain (at most 64 waiting). While the queue is
+not empty, the category reads `BLOCK`, even if later reports say `OK` or the document has left
+the search window. The reviewer clears the front of the queue by document number, and the next
+one latches straight away. When every listed document has been reviewed, `BLOCK` reads as
+`REVIEW`.
+
+**Coverage gap.** If a report arrives more than 14 days after the last one, the search windows
+no longer overlap and days went unsearched. Every category then gets a `COVERAGE-GAP` entry in
+its queue and stays `BLOCK` until a reviewer clears it.
 
 **Why this status.** The status page explains each category with `explain()` from `rules.ts`,
 built to `docs/rules.js`. The page fetches the trigger document and runs it through the same
@@ -48,15 +56,18 @@ contract; the page only explains it.
 
 | Situation | Result |
 |---|---|
-| API down, bad JSON, unexpected shape, node disagreement | Nothing written. Contract goes stale, then reads `BLOCK`. |
+| API down, bad JSON, unexpected shape, node disagreement | Nothing written. After `maxAge` (7 days) the contract reads `BLOCK`. |
 | Error status with a body that parses as "no results" | Rejected. Never reported as all-OK. |
 | Document outside the requested window, on either query | Run aborts. The API response is not trusted. |
 | No report ever received, or the last one older than `maxAge` | `BLOCK` |
 | Matched document of unknown type | `BLOCK` |
 | Final rule with no effective date | `BLOCK` (treated as already in effect) |
-| More results than one page holds, on either query | Every category `BLOCK` |
-| More than 16 blocking documents at once | Nothing written |
-| Blocking document not yet reviewed | `BLOCK`, through later `OK` reports, until a human clears that document |
+| More results than one page holds, a repeated document, or more documents than counted | Every category `BLOCK`, plus an `INCOMPLETE` entry to review |
+| More than 16 blocking documents at once | The newest 16 are listed; those categories also get an `INCOMPLETE` entry |
+| Blocking document not yet reviewed | `BLOCK`, through later `OK` reports and after it leaves the window, until a human clears that document |
+| More than 64 documents waiting in one category | Report rejected (`ReviewQueueFull`); the category already reads `BLOCK` |
+| Reports resume after more than 14 days | Every category held for a `COVERAGE-GAP` review |
+| The contract rejects a report | The workflow records a failed delivery, not a success |
 | Second blocking document arrives while one is latched | Latched as soon as the first is cleared |
 | Reviewer clears with the wrong document named | Rejected (`LatchedDocMismatch`) |
 | All blocking documents reviewed, still in the window | `REVIEW`, never `OK` |
@@ -65,7 +76,7 @@ contract; the page only explains it.
 | A report replayed on the other chain | Rejected: every payload carries its own chain ID |
 | Malformed report (trailing bytes, inconsistent lists) | Rejected (`InvalidReport`) |
 | On-chain read fails, or latest and finalized disagree | Treated as changed: the report is written |
-| Heartbeat set longer than the contract's `maxAge` allows | Capped at half of `maxAge` |
+| Heartbeat set longer than the contract's `maxAge` allows | Capped at a quarter of `maxAge` |
 | One chain's write fails or throws | The other chain is still written; the run fails loudly; the failed chain goes stale, then `BLOCK` |
 | Production contract with no workflow owner pinned | Cannot be deployed, and refuses every report |
 | Status page cannot reach the chain, or the chain returns implausible values | Shows `UNKNOWN`, never `OK` |
@@ -76,6 +87,30 @@ workflow owner (production), for this chain, with a strictly increasing timestam
 the two replay risks in Chainlink's consumer-contract docs: cross-chain replay and same-chain
 replay of a failed report. Ownership moves in two steps (`transferOwnership`, then
 `acceptOwnership`), and the author pin cannot be set to zero.
+
+**What the owner can do.** The owner can change the pinned workflow owner and the reviewer at
+once, with no timelock, and the contract checks the workflow owner, not the workflow ID. Both
+are fine for a testnet demo; production should use a multisig owner and pin the workflow ID
+too. In simulation mode the forwarder checks no signatures, so anyone can write a report.
+
+## Review before v3 (2026-10-26)
+
+Three independent reviews of the contract, workflow and page, plus Slither and Aderyn. Slither
+and Aderyn found no exploitable issue; Aderyn's owner-centralization note is the disclosure
+above. Every finding below is fixed and tested.
+
+| Finding | Fix | Test |
+|---|---|---|
+| A blocking document that left the window before review was forgotten, and the category could reopen | On-chain review queue: listed documents stay queued until cleared | `test_queuedDocumentLeavingWindowStillNeedsReview` |
+| A gap of more than 14 days between reports left days unsearched | `COVERAGE-GAP` entry in every category | `test_coverageGapHoldsEveryCategoryForReview` |
+| More than 16 blocking documents wrote nothing, so the contract went stale quietly | Newest 16 listed, plus an `INCOMPLETE` entry | `overflow and truncation together still fit one report` |
+| A truncated result had no document for a reviewer to sign off | Dated `INCOMPLETE` entry | `truncated results floor every category at BLOCK` |
+| A rule mentioning digital assets only in its body read `OK` | Search excerpts are classified too | `a body-only match counts through the excerpts` |
+| Spelling variants missed ("stable coin", "tokenizing", "virtual asset") | Wider patterns and search terms | `spelling variants match` |
+| SEC approval orders, MSRB filings and safe-harbor withdrawals treated as background | No longer informational | `an SEC order approving a filing ... is not informational` |
+| A repeated document in one response went unnoticed | Counts as incomplete | `a repeated document in one response marks the result incomplete` |
+| A report the contract rejected was logged as delivered | Receiver status checked | `a report the contract rejected is a failed delivery` |
+| Report gas could exceed the configured limit | Limit raised to 2,500,000; worst case measured | `test_worstCaseReportGas` |
 
 ## Security review before v2 (2026-10-20)
 
@@ -140,8 +175,8 @@ failed read counted as "changed".
 
 | Suite | Tests | Planted bugs caught |
 |---|---|---|
-| Workflow (`regGate.test.ts`, `e2e.test.ts`, `workflow.test.ts`) | 120 | 47 of 47 |
-| Contracts (`RegGateStatus.t.sol`, `GatedToken.t.sol`) | 51 | 25 of 25 |
+| Workflow (`regGate.test.ts`, `e2e.test.ts`, `workflow.test.ts`) | 136 | 58 of 58 |
+| Contracts (`RegGateStatus.t.sol`, `GatedToken.t.sol`) | 59 | 31 of 31 |
 
 A planted bug breaks one line of production code (for example, removing the forwarder check
 or ignoring the HTTP status) and confirms at least one test fails.
@@ -201,7 +236,7 @@ reg-gate-workflow/
   e2e.test.ts           real handlers for both triggers, mocked HTTP and two chains
   workflow.test.ts      config, trigger wiring, ABI and page-build cross-checks
 contracts/
-  src/RegGateStatus.sol    receiver: per-document review, replay guards, snapshot()
+  src/RegGateStatus.sol    receiver: review queue, coverage gap, replay guards, snapshot()
   src/GatedToken.sol       demo ERC-20 gated on a category
   test/                    Foundry tests
   verify/                  standard JSON inputs and constructor arguments for the explorers

@@ -133,7 +133,7 @@ for (const f of ['config.staging.json', 'config.production.json']) {
 		const others = (cfg.mirrors ?? []).filter((m: { chainSelectorName: string }) => m.chainSelectorName !== net.creChainName)
 		cfg.mirrors = [
 			...others,
-			{ chainSelectorName: net.creChainName, isTestnet: true, receiverAddress: gate.address, gasLimit: '1000000' },
+			{ chainSelectorName: net.creChainName, isTestnet: true, receiverAddress: gate.address, gasLimit: '2500000' },
 		]
 	} else {
 		cfg.receiverAddress = gate.address

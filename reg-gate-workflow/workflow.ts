@@ -87,6 +87,7 @@ const mirrorSchema = z
 	.strict()
 
 export const DEFAULT_HEARTBEAT_HOURS = 24
+const RECEIVER_REVERTED = 1
 
 export const configSchema = z
 	.object({
@@ -94,14 +95,16 @@ export const configSchema = z
 		frBaseUrl: z
 			.string()
 			.refine((u) => u === FR_DOCUMENTS_URL, `frBaseUrl must be exactly ${FR_DOCUMENTS_URL}`),
-		lookbackDays: z.number().int().min(1).max(90),
+		// At least 14: the contract holds every category for review after a gap longer than 14 days,
+		// so a shorter lookback would leave documents from a smaller gap unseen and unflagged.
+		lookbackDays: z.number().int().min(14).max(90),
 		perPage: z.number().int().min(1).max(100),
 		// Primary chain: written every run (unless unchanged) and watched for LatchCleared.
 		chainSelectorName: z.string().min(1),
 		isTestnet: z.boolean(),
 		receiverAddress: receiverSchema,
 		gasLimit: gasLimitSchema,
-		// Rewrite an unchanged status at least this often (capped at half the contract's maxAge).
+		// Rewrite an unchanged status at least this often (capped at a quarter of the contract's maxAge).
 		heartbeatHours: z.number().int().min(1).max(168).optional(),
 		mirrors: z.array(mirrorSchema).max(4).optional(),
 	})
@@ -257,6 +260,13 @@ const deliver = (
 			.result()
 		if (resp.txStatus !== TxStatus.SUCCESS) {
 			return { chain, outcome: 'failed', detail: resp.errorMessage || String(resp.txStatus) }
+		}
+		// The forwarder catches a revert in onReport, so the transaction can succeed while the
+		// contract refused the report (stale, replayed, bad author). That is a failed delivery.
+		// 1 is ReceiverContractExecutionStatus.REVERTED in the SDK's EVM client (not exported).
+		if (resp.receiverContractExecutionStatus === RECEIVER_REVERTED) {
+			const tx = bytesToHex(resp.txHash || new Uint8Array(32))
+			return { chain, outcome: 'failed', detail: `the contract rejected the report (txHash ${tx})` }
 		}
 		const tx = bytesToHex(resp.txHash || new Uint8Array(32))
 		runtime.log(`Reg-Gate: ${chain}: ${decision.reason}; report written, txHash ${tx}`)

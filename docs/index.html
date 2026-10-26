@@ -9,7 +9,7 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' https://ethereum-sepolia-rpc.publicnode.com https://sepolia.drpc.org https://base-sepolia-rpc.publicnode.com https://sepolia.base.org https://www.federalregister.gov; img-src 'self' data:; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="preload" href="fonts/PublicSans-Variable.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="app.css?v=7a2f051b">
+<link rel="stylesheet" href="app.css?v=0fe9dd2a">
 </head>
 <body>
 <nav><div class="wrap">
@@ -23,7 +23,7 @@
     <p class="kicker"><b>Reg-Gate</b><span>RegGateStatus <span class="mono" id="read-addr">reading</span></span></p>
     <h1 id="headline" aria-live="polite">Reading the contract.</h1>
     <p class="subline" id="subline" aria-live="polite">Statuses appear as soon as Sepolia answers.</p>
-    <p class="purpose">Tokenized assets that check the Federal Register before they move. A Chainlink CRE workflow sorts new federal rules into four asset categories and writes a status for each on-chain. Silence counts as BLOCK.</p>
+    <p class="purpose">Reg-Gate watches the Federal Register for new U.S. rules on digital assets, sorts each one into four categories, and posts the result on the blockchain. Tokens check it before every transfer, and if updates stop for a week, transfers pause. Built on Chainlink CRE.</p>
     <div class="ctas"><a class="btn primary" id="cta-contract" href="#integrate">View contract</a><a class="btn ghost" href="https://github.com/nctrnlsoul/reg-gate" target="_blank" rel="noopener noreferrer">Source on GitHub</a></div>
   </div>
   <section class="read" id="read" aria-label="Live read of the RegGateStatus contract">
@@ -38,8 +38,8 @@
   <section class="metrics" aria-label="Key numbers">
     <div class="metric"><div class="mlabel">Categories needing attention</div><div class="num"><span id="m1">…</span><small id="m1s"> of 4</small></div></div>
     <div class="metric"><div class="mlabel">Demo tokens blocked</div><div class="num"><span id="m2">…</span><small id="m2s"> of 2</small></div></div>
-    <div class="metric"><div class="mlabel">Until silence reads BLOCK</div><div class="num"><span id="m3">…</span><small id="m3s"> days</small></div></div>
-    <div class="metric"><div class="mlabel">Tests, every planted bug caught</div><div class="num"><span id="m4">171</span><small> passed</small></div></div>
+    <div class="metric"><div class="mlabel">Until transfers pause without an update</div><div class="num"><span id="m3">…</span><small id="m3s"> days</small></div></div>
+    <div class="metric"><div class="mlabel">Tests passing, all 89 planted bugs caught</div><div class="num"><span id="m4">195</span><small> passed</small></div></div>
   </section>
   <div class="alert" id="alert" role="status" hidden></div>
 
@@ -49,24 +49,24 @@
   </section>
 
   <section class="section" id="workflow">
-    <div class="sh"><h2>CRE workflow</h2><p>The Chainlink capabilities Reg-Gate calls, each linked to the line that calls it.</p></div>
+    <div class="sh"><h2>CRE workflow</h2><p>The Chainlink CRE building blocks Reg-Gate uses, each linked to the line of code that uses it.</p></div>
     <table class="cre">
       <thead><tr><th scope="col">Capability</th><th scope="col">In Reg-Gate</th><th scope="col">Source</th><th scope="col">Reference</th></tr></thead>
       <tbody>
-        <tr><td class="cap"><b>Cron trigger</b><code>CronCapability.trigger</code></td><td class="use">Runs the full check every six hours, schedule <code>0 0 */6 * * *</code>.</td><td class="ln"><a href="https://github.com/nctrnlsoul/reg-gate/blob/7d1af040d59bef5cc51133305a4976f749311e98/reg-gate-workflow/workflow.ts#L348" target="_blank" rel="noopener noreferrer">workflow.ts:348</a></td><td class="dl"><a href="https://docs.chain.link/cre/reference/sdk/triggers/cron-trigger-ts" target="_blank" rel="noopener noreferrer">CRE docs</a></td></tr>
-        <tr><td class="cap"><b>EVM log trigger</b><code>EVMClient.logTrigger</code></td><td class="use">A reviewer clearing a latch emits <code>LatchCleared</code>, and the check runs again at once. One listener per chain, at SAFE confidence.</td><td class="ln"><a href="https://github.com/nctrnlsoul/reg-gate/blob/7d1af040d59bef5cc51133305a4976f749311e98/reg-gate-workflow/workflow.ts#L351" target="_blank" rel="noopener noreferrer">workflow.ts:351</a></td><td class="dl"><a href="https://docs.chain.link/cre/reference/sdk/triggers/evm-log-trigger-ts" target="_blank" rel="noopener noreferrer">CRE docs</a></td></tr>
-        <tr><td class="cap"><b>HTTP client</b><code>HTTPClient.sendRequest</code></td><td class="use">Each node queries the Federal Register for documents published and taking effect, then classifies them into the four categories.</td><td class="ln"><a href="https://github.com/nctrnlsoul/reg-gate/blob/7d1af040d59bef5cc51133305a4976f749311e98/reg-gate-workflow/workflow.ts#L284" target="_blank" rel="noopener noreferrer">workflow.ts:284</a></td><td class="dl"><a href="https://docs.chain.link/cre/reference/sdk/http-client-ts" target="_blank" rel="noopener noreferrer">CRE docs</a></td></tr>
-        <tr><td class="cap"><b>Consensus</b><code>consensusIdenticalAggregation</code></td><td class="use">Signing goes ahead only when a quorum of nodes returns the exact same classified result.</td><td class="ln"><a href="https://github.com/nctrnlsoul/reg-gate/blob/7d1af040d59bef5cc51133305a4976f749311e98/reg-gate-workflow/workflow.ts#L284" target="_blank" rel="noopener noreferrer">workflow.ts:284</a></td><td class="dl"><a href="https://docs.chain.link/cre/reference/sdk/consensus-ts" target="_blank" rel="noopener noreferrer">CRE docs</a></td></tr>
-        <tr><td class="cap"><b>EVM read</b><code>EVMClient.callContract</code></td><td class="use">Reads <code>snapshot()</code> at the latest and the finalized block. It skips the write only when both already match and the daily heartbeat is not due; an unreadable chain always writes.</td><td class="ln"><a href="https://github.com/nctrnlsoul/reg-gate/blob/7d1af040d59bef5cc51133305a4976f749311e98/reg-gate-workflow/workflow.ts#L183" target="_blank" rel="noopener noreferrer">workflow.ts:183</a></td><td class="dl"><a href="https://docs.chain.link/cre/reference/sdk/evm-client-ts" target="_blank" rel="noopener noreferrer">CRE docs</a></td></tr>
-        <tr><td class="cap"><b>Signed report</b><code>runtime.report</code></td><td class="use">Signs the encoded result. The chain ID sits inside the payload, so a report cannot be replayed on the other chain.</td><td class="ln"><a href="https://github.com/nctrnlsoul/reg-gate/blob/7d1af040d59bef5cc51133305a4976f749311e98/reg-gate-workflow/workflow.ts#L254" target="_blank" rel="noopener noreferrer">workflow.ts:254</a></td><td class="dl"><a href="https://docs.chain.link/cre/guides/workflow/using-evm-client/onchain-write/overview-ts" target="_blank" rel="noopener noreferrer">CRE docs</a></td></tr>
-        <tr><td class="cap"><b>EVM write</b><code>EVMClient.writeReport</code></td><td class="use">Delivers the signed report through the forwarder to <code>RegGateStatus</code> on Ethereum Sepolia and Base Sepolia.</td><td class="ln"><a href="https://github.com/nctrnlsoul/reg-gate/blob/7d1af040d59bef5cc51133305a4976f749311e98/reg-gate-workflow/workflow.ts#L256" target="_blank" rel="noopener noreferrer">workflow.ts:256</a></td><td class="dl"><a href="https://docs.chain.link/cre/guides/workflow/using-evm-client/onchain-write/overview-ts" target="_blank" rel="noopener noreferrer">CRE docs</a></td></tr>
+        <tr><td class="cap"><b>Cron trigger</b><code>CronCapability.trigger</code></td><td class="use">Set to run the full check every six hours once deployed, schedule <code>0 0 */6 * * *</code>. In this demo, runs are started by hand in the simulator.</td><td class="ln"><a href="https://github.com/nctrnlsoul/reg-gate/blob/main/reg-gate-workflow/workflow.ts#L358" target="_blank" rel="noopener noreferrer">workflow.ts:348</a></td><td class="dl"><a href="https://docs.chain.link/cre/reference/sdk/triggers/cron-trigger-ts" target="_blank" rel="noopener noreferrer">CRE docs</a></td></tr>
+        <tr><td class="cap"><b>EVM log trigger</b><code>EVMClient.logTrigger</code></td><td class="use">A reviewer clearing a latch emits <code>LatchCleared</code>, and the check runs again at once. One listener per chain, at SAFE confidence.</td><td class="ln"><a href="https://github.com/nctrnlsoul/reg-gate/blob/main/reg-gate-workflow/workflow.ts#L361" target="_blank" rel="noopener noreferrer">workflow.ts:351</a></td><td class="dl"><a href="https://docs.chain.link/cre/reference/sdk/triggers/evm-log-trigger-ts" target="_blank" rel="noopener noreferrer">CRE docs</a></td></tr>
+        <tr><td class="cap"><b>HTTP client</b><code>HTTPClient.sendRequest</code></td><td class="use">Each node searches the Federal Register for digital asset terms, both new documents and rules taking effect, then sorts the results into the four categories.</td><td class="ln"><a href="https://github.com/nctrnlsoul/reg-gate/blob/main/reg-gate-workflow/workflow.ts#L294" target="_blank" rel="noopener noreferrer">workflow.ts:284</a></td><td class="dl"><a href="https://docs.chain.link/cre/reference/sdk/http-client-ts" target="_blank" rel="noopener noreferrer">CRE docs</a></td></tr>
+        <tr><td class="cap"><b>Consensus</b><code>consensusIdenticalAggregation</code></td><td class="use">Signing goes ahead only when a quorum of nodes returns the exact same result. The simulator runs one node in place of the network.</td><td class="ln"><a href="https://github.com/nctrnlsoul/reg-gate/blob/main/reg-gate-workflow/workflow.ts#L294" target="_blank" rel="noopener noreferrer">workflow.ts:284</a></td><td class="dl"><a href="https://docs.chain.link/cre/reference/sdk/consensus-ts" target="_blank" rel="noopener noreferrer">CRE docs</a></td></tr>
+        <tr><td class="cap"><b>EVM read</b><code>EVMClient.callContract</code></td><td class="use">Reads <code>snapshot()</code> at the latest and the finalized block. It skips the write only when both already match and the daily heartbeat is not due; an unreadable chain always writes.</td><td class="ln"><a href="https://github.com/nctrnlsoul/reg-gate/blob/main/reg-gate-workflow/workflow.ts#L186" target="_blank" rel="noopener noreferrer">workflow.ts:183</a></td><td class="dl"><a href="https://docs.chain.link/cre/reference/sdk/evm-client-ts" target="_blank" rel="noopener noreferrer">CRE docs</a></td></tr>
+        <tr><td class="cap"><b>Signed report</b><code>runtime.report</code></td><td class="use">Signs the encoded result. The chain ID sits inside the payload, so a report cannot be replayed on the other chain.</td><td class="ln"><a href="https://github.com/nctrnlsoul/reg-gate/blob/main/reg-gate-workflow/workflow.ts#L257" target="_blank" rel="noopener noreferrer">workflow.ts:254</a></td><td class="dl"><a href="https://docs.chain.link/cre/guides/workflow/using-evm-client/onchain-write/overview-ts" target="_blank" rel="noopener noreferrer">CRE docs</a></td></tr>
+        <tr><td class="cap"><b>EVM write</b><code>EVMClient.writeReport</code></td><td class="use">Delivers the signed report through the forwarder to <code>RegGateStatus</code> on Ethereum Sepolia and Base Sepolia.</td><td class="ln"><a href="https://github.com/nctrnlsoul/reg-gate/blob/main/reg-gate-workflow/workflow.ts#L259" target="_blank" rel="noopener noreferrer">workflow.ts:256</a></td><td class="dl"><a href="https://docs.chain.link/cre/guides/workflow/using-evm-client/onchain-write/overview-ts" target="_blank" rel="noopener noreferrer">CRE docs</a></td></tr>
       </tbody>
     </table>
-    <p class="crefoot"><span><b>Built on Chainlink CRE.</b> The reports on this page were broadcast with <code>cre workflow simulate --broadcast</code> through Chainlink's simulation forwarder.</span><a href="https://docs.chain.link/cre/guides/operations/simulating-workflows" target="_blank" rel="noopener noreferrer">Simulating workflows</a></p>
+    <p class="crefoot"><span><b>Built on Chainlink CRE.</b> The reports on this page were broadcast with <code>cre workflow simulate --broadcast</code> through Chainlink's simulation forwarder. That forwarder is open, so in this test setup anyone could send a report; a production deployment accepts only the pinned workflow owner.</span><a href="https://docs.chain.link/cre/guides/operations/simulating-workflows" target="_blank" rel="noopener noreferrer">Simulating workflows</a></p>
   </section>
 
   <section class="section" id="simulate">
-    <div class="sh"><h2>Simulate a transfer</h2><p>A read-only call on Sepolia. Nothing is signed or sent.</p></div>
+    <div class="sh"><h2>Simulate a transfer</h2><p>Ask the token on Sepolia what a transfer would do. Nothing is signed or sent.</p></div>
     <div class="sim">
       <form class="panel" id="simform" novalidate>
         <fieldset class="seg" id="simtokens"><legend class="legend">Token</legend></fieldset>
@@ -110,21 +110,21 @@
       </div>
       <div class="ref"><dl>
         <div class="rr"><dt>Categories</dt><dd><code>0</code> Stablecoins<br><code>1</code> Tokenized securities<br><code>2</code> Digital asset markets<br><code>3</code> AML and sanctions</dd></div>
-        <div class="rr"><dt>Status</dt><dd><code>0</code> OK, <code>1</code> REVIEW, <code>2</code> BLOCK.<br><span class="m">No report, a stale report, or a latched category reads BLOCK.</span></dd></div>
-        <div class="rr"><dt>Strict or lenient</dt><dd>Strict moves only on OK. Lenient stops only on BLOCK.</dd></div>
+        <div class="rr"><dt>Status</dt><dd><code>0</code> OK, <code>1</code> REVIEW, <code>2</code> BLOCK.<br><span class="m">No report, a report older than a week, or a document still waiting for review reads BLOCK.</span></dd></div>
+        <div class="rr"><dt>Strict or lenient</dt><dd>Strict moves only on OK. Lenient moves unless BLOCK.</dd></div>
         <div class="rr"><dt>Gate address</dt><dd id="gateaddrs"><span class="m">reading</span></dd></div>
       </dl></div>
     </div>
   </section>
 
   <section class="section">
-    <div class="sh"><h2>Contract events</h2><p>RegGateStatus and the Chainlink forwarder, Sepolia</p></div>
-    <ol class="events" id="events"><li><span class="t">loading</span><span class="w">Reading events</span></li></ol>
+    <div class="sh"><h2>Recent activity</h2><p>Reports the contract accepted or rejected, and items held for review, on Sepolia.</p></div>
+    <ol class="events" id="events"><li><span class="t">loading</span><span class="w">Reading activity</span></li></ol>
   </section>
 </main>
 
 <footer><div class="wrap"><span>Testnet demo: reports are written by the CRE workflow simulator through Chainlink's simulation forwarder. Flags federal publications for human review. Not legal advice.</span><span class="maker"><img src="northschema-mark-black.png" width="16" height="16" alt="">Built by NorthSchema</span><a href="https://github.com/nctrnlsoul/reg-gate" target="_blank" rel="noopener noreferrer">MIT licensed source</a></div></footer>
 
-<script src="app.js?v=cfd1f0a6" defer></script>
+<script src="app.js?v=a5175410" defer></script>
 </body>
 </html>

@@ -246,12 +246,15 @@ describe('classify', () => {
 		const r = run([UNSAFE_PRACTICES], 75)
 		expect(r.truncated).toBe(true)
 		expect(r.statuses).toEqual([Status.BLOCK, Status.BLOCK, Status.BLOCK, Status.BLOCK])
-		expect(r.blockDocs).toEqual([[], [], [], []]) // BLOCK with no document: reads BLOCK, nothing to clear
+		// Each category lists a dated placeholder, so a reviewer must sign off on the unseen part.
+		expect(r.blockDocs).toEqual([['INCOMPLETE-2026-09-30'], ['INCOMPLETE-2026-09-30'], ['INCOMPLETE-2026-09-30'], ['INCOMPLETE-2026-09-30']])
+		expect(r.triggerDocs).toEqual(['INCOMPLETE-2026-09-30', 'INCOMPLETE-2026-09-30', 'INCOMPLETE-2026-09-30', 'INCOMPLETE-2026-09-30'])
 	})
 	test('truncation keeps the blocking documents it did see', () => {
 		const r = run([raw({ ...GENIUS, type: 'Rule' })], 99)
 		expect(r.statuses[idx('STABLECOINS')]).toBe(Status.BLOCK)
-		expect(r.blockDocs[idx('STABLECOINS')]).toEqual(['2026-16796'])
+		expect(r.blockDocs[idx('STABLECOINS')]).toEqual(['INCOMPLETE-2026-09-30', '2026-16796'])
+		expect(r.triggerDocs[idx('STABLECOINS')]).toBe('2026-16796')
 	})
 	test('document outside the requested window throws (do not trust the query)', () => {
 		expect(() => run([raw({ ...GENIUS, publication_date: '2026-10-15' })])).toThrow('outside requested window')
@@ -363,9 +366,20 @@ describe('effective dates: a final rule blocks when it takes effect, not when it
 		expect(fwd.blockDocs).toEqual(rev.blockDocs)
 		expect(fwd.blockDocs[idx('STABLECOINS')]).toEqual(['2026-40003', '2026-40002', '2026-40001'])
 	})
-	test('more blocking documents than the report can carry: write nothing rather than a partial list', () => {
+	test('more blocking documents than one report can carry: BLOCK with a placeholder, never a silent gap', () => {
+		// Review finding 2026-10-26: this used to throw, so nothing was written and the old
+		// (possibly all OK) status stayed valid for up to maxAge.
 		const docs = Array.from({ length: 17 }, (_, k) => raw({ ...FINAL, document_number: `2026-5${String(k).padStart(4, '0')}`, effective_on: '2026-09-01' }))
-		expect(() => classify(P(docs), W.start, W.end, P([]), TODAY, HORIZON)).toThrow('exceed the report cap')
+		const r = classify(P(docs), W.start, W.end, P([]), TODAY, HORIZON)
+		const total = r.blockDocs.reduce((n, l) => n + l.length, 0)
+		expect(total).toBeLessThanOrEqual(16)
+		expect(r.overflow).toBe(true)
+		expect(r.truncated).toBe(false)
+		const s = idx('STABLECOINS')
+		expect(r.statuses[s]).toBe(Status.BLOCK)
+		expect(r.blockDocs[s][0]).toBe('INCOMPLETE-2026-10-01')
+		expect(deserializeResult(serializeResult(r))).toEqual(r)
+		expect(() => encodeReport(11155111n, 1n, r)).not.toThrow()
 	})
 })
 
@@ -546,6 +560,14 @@ describe('writeDecision (heartbeat: skip only when sure nothing changes)', () =>
 		blockCats: [] as number[],
 		...over,
 	})
+	test('the heartbeat is capped at a quarter of maxAge (a late clock or one failed run cannot go stale)', () => {
+		const H = 3600n
+		const state = (lastAsOf: bigint, maxAge: bigint) => ({ lastAsOf, maxAge, statuses: [0, 0, 0, 0], triggerDocs: [docToBytes32(''), docToBytes32(''), docToBytes32(''), docToBytes32('')], blockDocs: [], blockCats: [] })
+		const ok = run([])
+		// maxAge 12h with a 6h cron: the cap is 3h, so every 6-hourly run rewrites.
+		expect(writeDecision(state(1000n, 12n * H), ok, 1000n + 6n * H - 4n, 24n * H).write).toBe(true)
+		expect(writeDecision(state(1000n, 12n * H), ok, 1000n + 2n * H, 24n * H).write).toBe(false)
+	})
 	test('identical status, fresh report: skip', () => {
 		expect(writeDecision(held(), r, NOW, 24n * H)).toEqual({
 			write: false,
@@ -691,5 +713,108 @@ describe('explain (the status page runs this; it must never disagree with classi
 		expect(e.informational).toBe('withdrawn-proposal')
 		expect(e.categories).toEqual(['STABLECOINS'])
 		expect(e.severity).toBeNull()
+	})
+})
+
+describe('review findings 2026-10-26: body text, spelling variants, filings, completeness', () => {
+	const EOP = [{ name: 'Executive Office of the President', slug: 'executive-office-of-the-president' }]
+	const SEC = [{ name: 'Securities and Exchange Commission', slug: 'securities-and-exchange-commission' }]
+	// 2025-02123: no abstract; digital assets appear only in the body (live excerpt shape, 2026-10-26).
+	const EO_2025_02123 = raw({
+		document_number: '2025-02123',
+		title: 'Strengthening American Leadership in Digital Financial Technology',
+		type: 'Presidential Document',
+		publication_date: '2026-09-02',
+		abstract: null,
+		excerpts: 'any digital representation of value that is recorded on a <span class="match">distributed</span>\n<span class="match">ledger</span>, including <span class="match">cryptocurrencies</span>, digital tokens&hellip;',
+		agencies: EOP,
+	})
+	test('a body-only match counts through the excerpts (it used to read OK everywhere)', () => {
+		const r = run([EO_2025_02123])
+		expect(r.statuses[idx('DIGITAL_ASSET_MARKETS')]).toBe(Status.BLOCK)
+		expect(r.ignored).toBe(0)
+	})
+	test('excerpts are matched as plain text: tags, entities and line breaks removed', () => {
+		const d = parseFederalRegisterResponse(body([raw({ excerpts: 'rules for <span class="match">digital</span>\n<span class="match">asset</span> markets &amp; more' })])).documents[0]
+		expect(d.excerpts).toBe('rules for digital asset markets & more')
+		expect(categoriesFor(d)).toContain('DIGITAL_ASSET_MARKETS')
+	})
+	test('excerpts may be null or absent; anything else is rejected', () => {
+		expect(parseFederalRegisterResponse(body([raw({ excerpts: null })])).documents[0].excerpts).toBe('')
+		expect(parseFederalRegisterResponse(body([raw()])).documents[0].excerpts).toBe('')
+		expect(() => parseFederalRegisterResponse(body([raw({ excerpts: 7 })]))).toThrow('bad excerpts')
+	})
+	test('explain points at the excerpt when that is where the match is', () => {
+		const d = parseFederalRegisterResponse(body([EO_2025_02123])).documents[0]
+		const e = explain(d, '2026-09-30')
+		expect(e.outcome).toBe('matched')
+		expect(e.evidence.find((x) => x.category === 'DIGITAL_ASSET_MARKETS')?.field).toBe('excerpt')
+	})
+	test('spelling variants match: hyphens, spacing, word forms', () => {
+		const cats = (title: string) => categoriesFor(parseFederalRegisterResponse(body([raw({ title })])).documents[0])
+		expect(cats('Digital-Asset Market Structure')).toContain('DIGITAL_ASSET_MARKETS')
+		expect(cats('Payment Stable Coin Issuers')).toContain('STABLECOINS')
+		expect(cats('Tokenizing Securities; Exemptive Relief')).toContain('TOKENIZED_SECURITIES')
+		expect(cats('Virtual Asset Service Providers')).toContain('DIGITAL_ASSET_MARKETS')
+		expect(cats('Block chain records')).toContain('DIGITAL_ASSET_MARKETS')
+		expect(cats('Cryptographic key management')).toEqual([]) // not crypto assets
+	})
+	test('an exchange filing about tokenized securities is the category itself, not background', () => {
+		const sro = raw({ title: 'Self-Regulatory Organizations; The Nasdaq Stock Market LLC; Notice of Filing of a Proposed Rule Change To Permit Trading of Tokenized Securities', type: 'Notice', agencies: SEC })
+		const d = parseFederalRegisterResponse(body([sro])).documents[0]
+		expect(informationalReason(d)).toBeNull()
+		expect(run([sro]).statuses[idx('TOKENIZED_SECURITIES')]).toBe(Status.REVIEW)
+	})
+	test('an SEC order approving a filing, or one effective on filing, is not informational', () => {
+		for (const title of [
+			'Self-Regulatory Organizations; Cboe BZX Exchange, Inc.; Order Approving a Proposed Rule Change To List Shares of a Bitcoin Trust',
+			'Self-Regulatory Organizations; NYSE Arca, Inc.; Notice of Filing and Immediate Effectiveness of a Proposed Rule Change on Crypto Asset Options',
+			'Self-Regulatory Organizations; Municipal Securities Rulemaking Board; Notice of Filing of a Proposed Rule Change on Digital Asset Disclosures',
+		]) {
+			const d = parseFederalRegisterResponse(body([raw({ title, type: 'Notice', agencies: SEC })])).documents[0]
+			expect(informationalReason(d)).toBeNull()
+		}
+	})
+	test('withdrawing a safe harbor tightens the rules, so it is not informational', () => {
+		const d = parseFederalRegisterResponse(body([raw({ title: 'Token Safe Harbor for Digital Asset Offerings; Withdrawal', type: 'Proposed Rule', agencies: SEC })])).documents[0]
+		expect(informationalReason(d)).toBeNull()
+	})
+	test('a repeated document in one response marks the result incomplete', () => {
+		const p = parseFederalRegisterResponse(body([GENIUS, GENIUS]))
+		expect(p.documents).toHaveLength(1)
+		expect(p.duplicates).toBe(1)
+		const r = run([GENIUS, GENIUS])
+		expect(r.truncated).toBe(true)
+		expect(r.statuses).toEqual([Status.BLOCK, Status.BLOCK, Status.BLOCK, Status.BLOCK])
+	})
+	test('a repeated document counts as incomplete even when the count matches the unique list', () => {
+		const r = run([GENIUS, GENIUS], 1)
+		expect(r.truncated).toBe(true)
+		expect(r.statuses).toEqual([Status.BLOCK, Status.BLOCK, Status.BLOCK, Status.BLOCK])
+	})
+	test('a response listing more documents than it counted counts as incomplete', () => {
+		const other = raw({ ...GENIUS, document_number: '2026-16797' })
+		expect(run([GENIUS, other], 1).truncated).toBe(true)
+	})
+	test('an exchange filing under "Regulation Crypto" is the tokenized category itself, not background', () => {
+		const sro = raw({ title: 'Self-Regulatory Organizations; The Nasdaq Stock Market LLC; Notice of Filing of a Proposed Rule Change To Adopt Rules Under Regulation Crypto', type: 'Notice', agencies: SEC })
+		const d = parseFederalRegisterResponse(body([sro])).documents[0]
+		expect(informationalReason(d)).toBeNull()
+		expect(run([sro]).statuses[idx('TOKENIZED_SECURITIES')]).not.toBe(Status.OK)
+	})
+	test('overflow and truncation together still fit one report, oldest documents dropped first', () => {
+		const FINAL = raw({ ...GENIUS, type: 'Rule', effective_on: '2026-09-01' })
+		const docs = Array.from({ length: 20 }, (_, k) => raw({ ...FINAL, document_number: `2026-6${String(k).padStart(4, '0')}`, publication_date: `2026-09-${String(10 + (k % 19)).padStart(2, '0')}` }))
+		const r = run(docs, 40)
+		expect(r.truncated).toBe(true)
+		expect(r.blockDocs.reduce((n, l) => n + l.length, 0)).toBeLessThanOrEqual(16)
+		for (const list of r.blockDocs) expect(list[0]).toBe('INCOMPLETE-2026-09-30')
+		expect(() => encodeReport(11155111n, 1n, r)).not.toThrow()
+	})
+	test('deserialize rejects a result without the completeness flags', () => {
+		const r = run([GENIUS])
+		const j = JSON.parse(serializeResult(r))
+		delete j.overflow
+		expect(() => deserializeResult(JSON.stringify(j))).toThrow('completeness')
 	})
 })

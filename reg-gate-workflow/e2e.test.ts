@@ -242,6 +242,15 @@ describe('onCronTrigger end to end', () => {
 		const runtime = newTestRuntime(null, donTime, config)
 		expect(() => onCronTrigger(runtime as any, payload)).toThrow('Failed to write report')
 	})
+
+	test('a report the contract rejected is a failed delivery, not a write (review finding 2026-10-26)', () => {
+		wire({ status: 200, body: JSON.stringify(LIVE_RESULTS) })
+		const evmMock = EvmMock.testInstance(network.chainSelector.selector)
+		// The forwarder transaction succeeds; onReport reverted inside it.
+		evmMock.writeReport = () => ({ txStatus: TxStatus.SUCCESS, txHash: new Uint8Array(32).fill(0xab), receiverContractExecutionStatus: 1 })
+		const runtime = newTestRuntime(null, donTime, config)
+		expect(() => onCronTrigger(runtime as any, payload)).toThrow('the contract rejected the report')
+	})
 })
 
 /** A LatchCleared log as the EVM log trigger delivers it. */

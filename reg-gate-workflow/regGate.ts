@@ -75,11 +75,12 @@ export interface WriteDecision {
  *   - read failed or returned a bad shape         -> write
  *   - no report on-chain yet                      -> write
  *   - any status, trigger or blocking document differs -> write
- *   - last report is at least min(heartbeat, maxAge / 2) old -> write
+ *   - last report is at least min(heartbeat, maxAge / 4) old -> write
  *   - otherwise                                   -> skip
  *
- * The maxAge / 2 cap means a misconfigured heartbeat can never let a chain go
- * stale between two runs that both skip.
+ * The maxAge / 4 cap means a misconfigured heartbeat can never let a chain go stale
+ * between runs that skip, even with a run's clock a little late or one run failing,
+ * as long as maxAge is at least twice the cron interval.
  */
 export function writeDecision(
 	onChain: OnChainState | null,
@@ -106,8 +107,8 @@ export function writeDecision(
 	) {
 		return { write: true, reason: 'blocking documents changed' }
 	}
-	const halfMaxAge = onChain.maxAge / 2n
-	const limit = heartbeatSeconds < halfMaxAge ? heartbeatSeconds : halfMaxAge
+	const quarterMaxAge = onChain.maxAge / 4n
+	const limit = heartbeatSeconds < quarterMaxAge ? heartbeatSeconds : quarterMaxAge
 	const age = asOf - onChain.lastAsOf
 	if (age >= limit) return { write: true, reason: `heartbeat due (last report ${age}s old, limit ${limit}s)` }
 	return { write: false, reason: `unchanged, last report ${age}s old (heartbeat at ${limit}s)` }

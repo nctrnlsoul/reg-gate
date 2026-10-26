@@ -357,6 +357,116 @@ contract RegGateStatusTest {
         _eq(gate.statusOf(0), gate.OK(), "both reviewed, latest report OK");
     }
 
+    /// Review finding 2026-10-26: a second blocking document that left the search window while
+    /// the first held the latch was forgotten, and the category read OK with it never reviewed.
+    function test_queuedDocumentLeavingWindowStillNeedsReview() public {
+        _block0(T0, _two(DOC_A, DOC_B)); // A latched, B queued behind it
+        vm.warp(T0 + 7 days);
+        _block0(T0 + 7 days, _two(DOC_A, DOC_B)); // the workflow keeps reporting while the reviewer is slow
+        vm.warp(T0 + 15 days);
+        _send(T0 + 15 days, _all(0), _none()); // both left the window: report says OK, lists nothing
+        _clear(0, DOC_A);
+        (bool l, bytes32 doc, uint256 unreviewed) = _latched(0);
+        require(l && doc == DOC_B, "B latches although no report lists it any more");
+        _eq(unreviewed, 1, "B still queued");
+        _eq(gate.statusOf(0), gate.BLOCK(), "never OK while B is unreviewed");
+        require(!gate.isAllowed(0, true) && !gate.isAllowed(0, false), "no token moves");
+        _clear(0, DOC_B);
+        _eq(gate.statusOf(0), gate.OK(), "both reviewed, latest report OK");
+    }
+
+    function test_reviewQueueKeepsArrivalOrderAndNeverRequeues() public {
+        _block0(T0, _two(DOC_A, DOC_B));
+        _block0(T0 + 60, _two(DOC_C, DOC_A)); // C arrives later; A listed again
+        bytes32[] memory q = gate.reviewQueue(0);
+        require(q.length == 3 && q[0] == DOC_A && q[1] == DOC_B && q[2] == DOC_C, "oldest first, no duplicates");
+        _clear(0, DOC_A);
+        _block0(T0 + 120, _one(DOC_A)); // a reviewed document listed again is not queued again
+        q = gate.reviewQueue(0);
+        require(q.length == 2 && q[0] == DOC_B && q[1] == DOC_C, "A stays reviewed");
+        (bool l, bytes32 doc,) = _latched(0);
+        require(l && doc == DOC_B, "next in line is latched");
+    }
+
+    function test_reviewQueueFullRejectsReport() public {
+        uint256 maxPending = gate.MAX_PENDING();
+        uint64 t = T0;
+        uint256 queued;
+        while (queued < maxPending) {
+            uint256 n = maxPending - queued < 16 ? maxPending - queued : 16;
+            bytes32[] memory docs = new bytes32[](n);
+            for (uint256 i = 0; i < n; i++) docs[i] = bytes32(queued + i + 1);
+            vm.warp(t);
+            _block0(t, docs);
+            queued += n; t += 60;
+        }
+        _eq(gate.reviewQueue(0).length, maxPending, "queue at its cap");
+        vm.warp(t);
+        vm.prank(FORWARDER);
+        vm.expectRevert(abi.encodeWithSelector(RegGateStatus.ReviewQueueFull.selector, uint8(0)));
+        gate.onReport(_meta(AUTHOR), _encode(block.chainid, t, [uint8(2), 0, 0, 0], [bytes32(uint256(999)), bytes32(0), bytes32(0), bytes32(0)], _one(bytes32(uint256(999))), _cats(1, 0)));
+        _eq(gate.statusOf(0), gate.BLOCK(), "still BLOCK");
+    }
+
+    /// The workflow writes with a fixed gas limit (config gasLimit). The worst case report must fit.
+    function test_worstCaseReportGas() public {
+        bytes32[] memory docs = new bytes32[](16);
+        uint8[] memory cats = new uint8[](16);
+        for (uint256 i = 0; i < 16; i++) { docs[i] = bytes32(i + 1); cats[i] = uint8(i % 4); }
+        bytes memory r = _encode(block.chainid, T0, _all(2), [docs[0], docs[1], docs[2], docs[3]], docs, cats);
+        vm.prank(FORWARDER);
+        uint256 g0 = gasleft();
+        gate.onReport(_meta(AUTHOR), r);
+        uint256 used = g0 - gasleft();
+        require(used < 2_000_000, "worst-case report must leave headroom under the 2,500,000 gas limit in config");
+    }
+
+    /// Review finding 2026-10-26: after a gap longer than the workflow's 14-day window, a report
+    /// read OK at once, although documents published early in the gap were never seen.
+    function test_coverageGapHoldsEveryCategoryForReview() public {
+        _send(T0, _all(0), _none());
+        uint64 t = T0 + 30 days;
+        vm.warp(t);
+        _send(t, _all(0), _none());
+        bytes32 gap = gate.COVERAGE_GAP();
+        for (uint8 c = 0; c < 4; c++) {
+            _eq(gate.statusOf(c), gate.BLOCK(), "every category held after the gap");
+            (bool l, bytes32 doc,) = _latched(c);
+            require(l && doc == gap, "latched on the gap marker");
+        }
+        _clear(0, gap);
+        _eq(gate.statusOf(0), gate.OK(), "signed off: the latest report applies");
+        _eq(gate.statusOf(1), gate.BLOCK(), "other categories still need their own sign-off");
+        require(!gate.isReviewed(0, gap), "the marker is never marked reviewed");
+        // A second gap queues it again.
+        t += 30 days; vm.warp(t);
+        _send(t, _all(0), _none());
+        _eq(gate.statusOf(0), gate.BLOCK(), "a later gap holds the category again");
+    }
+
+    function test_emptyDocumentLatchHoldsThroughLaterOkReports() public {
+        _send(T0, [uint8(2), 0, 0, 0], _none()); // BLOCK with no document: latched on the empty document
+        _send(T0 + 60, _all(0), _none());          // a later report says OK
+        _eq(gate.statusOf(0), gate.BLOCK(), "the latch holds until a reviewer clears it");
+        _clear(0, bytes32(0));
+        _eq(gate.statusOf(0), gate.OK(), "cleared, and the latest report is OK");
+    }
+
+    function test_noCoverageGapWithinWindow() public {
+        _send(T0, _all(0), _none());
+        uint64 t = T0 + 14 days;
+        vm.warp(t);
+        _send(t, _all(0), _none());
+        _eq(gate.statusOf(0), gate.OK(), "exactly the window is covered");
+        _eq(gate.reviewQueue(0).length, 0, "nothing queued");
+    }
+
+    function test_firstReportIsNotAGap() public {
+        vm.warp(T0 + 400 days);
+        _send(T0 + 400 days, _all(0), _none());
+        _eq(gate.statusOf(0), gate.OK(), "the very first report has nothing before it to miss");
+    }
+
     /// Audit finding: a blocking document hidden behind a reviewed trigger document.
     function test_unreviewedDocumentBehindReviewedTriggerLatches() public {
         _block0(T0, _one(DOC_A));

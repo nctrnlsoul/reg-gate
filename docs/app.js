@@ -12,6 +12,16 @@
   const STATUS = ['OK', 'REVIEW', 'BLOCK'];
   const ADDR = /^0x[0-9a-fA-F]{40}$/;
   const DOCNUM = /^\d{4}-\d{4,6}$/;
+  const COVERAGE_GAP = 'COVERAGE-GAP';
+  const INCOMPLETE = /^INCOMPLETE-\d{4}-\d{2}-\d{2}$/;
+  const FR_SEARCH = 'https://www.federalregister.gov/api/v1/documents.json';
+  /** Plain words for the values the contract stores in place of a document number. */
+  function placeholderText(doc) {
+    if (doc === COVERAGE_GAP) return 'Updates stopped for more than two weeks, so anything published in the gap is unchecked.';
+    if (INCOMPLETE.test(doc)) return 'More matching documents than one report can list (search of ' + doc.slice(11) + '), so the rest are unchecked.';
+    return null;
+  }
+  const docShort = (doc) => (DOCNUM.test(doc) ? 'FR Doc. ' + doc : doc === COVERAGE_GAP ? 'gap in updates' : INCOMPLETE.test(doc) ? 'too many to list' : doc);
   const FR_API = 'https://www.federalregister.gov/api/v1/documents/';
   const AGENCY_SHORT = {
     'securities-and-exchange-commission': 'SEC', 'commodity-futures-trading-commission': 'CFTC',
@@ -153,7 +163,7 @@
       const fn = el('span', 'fn'); fn.append('statusOf(', el('em', null, key), ')'); nm.append(fn);
       const val = el('span', 'val t-' + status + (animate ? ' pending' : ''), status);
       val.dataset.final = status;
-      const doc = el('span', 'doc', r ? (r.doc ? (DOCNUM.test(r.doc) ? 'FR Doc. ' + r.doc : r.doc) : r.fresh ? 'no document' : 'stale') : '');
+      const doc = el('span', 'doc', r ? (r.doc ? docShort(r.doc) : r.fresh ? 'no document' : 'stale') : '');
       const tok = state && state.tokens ? state.tokens.find((t) => t.category === key) : null;
       const open = tok ? tokenOpen(tok) : null;
       const rail = el('span', 'rail' + (tok ? (open === true ? ' lit' : ' cut') : ''));
@@ -233,7 +243,7 @@
   function tryShowMetrics() {
     if (metricsShown || !metricsVisible || !pendingMetrics) return;
     metricsShown = true;
-    countUp($('m1'), pendingMetrics.notClear); countUp($('m2'), pendingMetrics.blocked); countUp($('m3'), pendingMetrics.age); countUp($('m4'), 171);
+    countUp($('m1'), pendingMetrics.notClear); countUp($('m2'), pendingMetrics.blocked); countUp($('m3'), pendingMetrics.age); countUp($('m4'), 195);
   }
   function setMetrics(m) {
     pendingMetrics = m;
@@ -253,7 +263,7 @@
   const openWhy = new Set();
   let trailSeq = 0;
   const CAT_NAME = Object.fromEntries(CATS.map(([k, n]) => [k, n]));
-  const FIELD = { title: 'in the title', abstract: 'in the abstract', agency: '' };
+  const FIELD = { title: 'in the title', abstract: 'in the abstract', excerpt: 'in the document text', agency: '' };
   const agencyLabel = (slug) => AGENCY_SHORT[slug] || slug || 'an unnamed agency';
   // The report's own UTC date: the workflow judges effective dates against it, and its
   // publication window ends the day before.
@@ -265,14 +275,25 @@
   function loadFullDoc(num) {
     if (fullDocs.has(num)) return fullDocs.get(num);
     const p = (async () => {
-      const f = ['document_number', 'title', 'type', 'publication_date', 'effective_on', 'abstract', 'agencies'].map((x) => 'fields%5B%5D=' + x).join('&');
+      const fields = ['document_number', 'title', 'type', 'publication_date', 'effective_on', 'abstract', 'agencies'];
+      const f = (list) => list.map((x) => 'fields%5B%5D=' + x).join('&');
       const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 8000);
       try {
         let obj;
         try {
-          const resp = await fetch(FR_API + num + '.json?' + f, { signal: ctrl.signal });
+          // The workflow's own search, narrowed to this document: the Federal Register returns
+          // body excerpts only for a search, and the classifier reads them.
+          const q = FR_SEARCH + '?' + f([...fields, 'excerpts']) + '&conditions%5Bterm%5D=' + encodeURIComponent(rules.SEARCH_TERM) + '&conditions%5Bdocument_numbers%5D%5B%5D=' + num;
+          const resp = await fetch(q, { signal: ctrl.signal });
           if (!resp.ok) throw new Error('status ' + resp.status);
-          obj = await resp.json();
+          const body = await resp.json();
+          obj = body && Array.isArray(body.results) && body.results.length === 1 ? body.results[0] : null;
+          if (!obj) {
+            // Not found by the search: fall back to the document alone, without excerpts.
+            const one = await fetch(FR_API + num + '.json?' + f(fields), { signal: ctrl.signal });
+            if (!one.ok) throw new Error('status ' + one.status);
+            obj = await one.json();
+          }
         } catch { fullDocs.delete(num); return { error: 'network' }; }
         try {
           // The same strict parser the workflow uses: a surprise here means no explanation, not a wrong one.
@@ -297,12 +318,12 @@
     const asOf = reportDay(r.last);
     let warn = null;
     if (!r.doc) {
-      row('Window', 'Federal Register publications through ' + fmtIso(reportDay(r.last, -1)) + ', plus final rules taking effect from the window start to a year ahead.');
+      row('Window', 'Federal Register documents that mention digital asset terms, published in the two weeks through ' + fmtIso(reportDay(r.last, -1)) + ', plus final rules taking effect from then to a year ahead.');
       if (r.reported === 'OK') row('Match', 'Nothing in scope matched ' + CAT_NAME[key] + '.');
-      else row('Match', el('span', 'm', 'No single document is recorded. The result set was larger than one page, so every category was floored at BLOCK rather than trusting a partial list.'));
+      else row('Match', el('span', 'm', 'No document is recorded for this result.'));
     } else if (!DOCNUM.test(r.doc)) {
       row('Document', el('span', 'mono', r.doc));
-      row('Explain', el('span', 'm', 'The stored value is not a Federal Register document number, so there is nothing to look up. The status comes straight from the contract.'));
+      row('Explain', el('span', 'm', placeholderText(r.doc) || 'The stored value is not a Federal Register document number, so there is nothing to look up.'), el('span', 'm', placeholderText(r.doc) ? ' The category reads BLOCK until a reviewer checks it.' : ' The status comes straight from the contract.'));
     } else if (!doc) {
       row('Document', ext('https://www.federalregister.gov/d/' + r.doc, r.doc));
       const why = !rules ? 'The rules could not load.' : got && got.error === 'parse' ? 'The Federal Register answered with a shape the parser does not accept, so no explanation is shown.' : 'The Federal Register did not answer just now.';
@@ -333,13 +354,13 @@
     const enforced = [' Enforced ', stSpan(r.status)];
     let why = '';
     if (!r.fresh) why = ', because the report is stale.';
-    else if (r.latched) why = ', held for review of ' + (r.latchDoc || 'a blocking result with no document') + (r.unreviewed > 1 ? ' (' + r.unreviewed + ' blocking documents unreviewed)' : '') + '.';
+    else if (r.latched) why = ', held until a reviewer signs off on ' + (!r.latchDoc ? 'a blocking result with no document' : r.latchDoc === COVERAGE_GAP ? 'the gap in updates' : INCOMPLETE.test(r.latchDoc) ? 'the documents left out' : docShort(r.latchDoc)) + (r.unreviewed > 1 ? ' (' + r.unreviewed + ' items waiting for review, one at a time)' : '') + '.';
     else if (r.reported === 'BLOCK' && r.status === 'REVIEW') why = ', a person reviewed every blocking document.';
     else why = '.';
     row('On-chain', 'Reported ', stSpan(r.reported), '.', ...enforced, why);
     for (const t of (state.tokens || []).filter((x) => x.category === key)) {
       const open = t.allowed === true;
-      row('Token', t.symbol + (t.strict ? ' is strict, so it moves only on OK. ' : ' is lenient, so it stops only on BLOCK. '), t.allowed == null ? 'Unreadable, treat as blocked.' : 'Transfers are ' + (open ? 'open.' : 'blocked.'));
+      row('Token', t.symbol + (t.strict ? ' is strict: it moves only on OK. ' : ' is lenient: it moves unless BLOCK. '), t.allowed == null ? 'Unreadable, treat as blocked.' : 'Transfers are ' + (open ? 'open.' : 'blocked.'));
     }
     if (warn) row('Note', el('span', 'warnline', 'This recomputation differs from the stored report. The contract enforces the report. A difference means the rules changed after that report or the result set was truncated.'));
     const foot = el('div', 'tfoot');
@@ -441,27 +462,25 @@
       lines.push(l1, l2, l3);
       const v = el('div', 'verdict');
       const cat = CAT_NAME[t.category] || t.category;
+      const say = (head, plain, call) => v.append(el('b', 'vhead', head), el('span', 'plain', plain), el('code', 'vcall', call));
       if (!res.reverted) {
         const ok = res.data.length >= 66 && BigInt(res.data.slice(0, 66)) === 1n;
         v.className = 'verdict ' + (ok ? 'okay' : 'rev');
-        v.append(el('b', null, ok ? 'returns true' : 'returns ' + res.data.slice(0, 18)));
-        v.append(el('span', 'plain', ok ? cat + ' allows it: ' + t.symbol + ' is ' + (t.strict ? 'strict and the status is OK.' : 'lenient and the status is not BLOCK.') : 'Unexpected return value. Treat as not transferred.'));
+        if (ok) say('Would go through', cat + ' allows it. ' + t.symbol + (t.strict ? ' is strict and the status is OK.' : ' is lenient and the status is not BLOCK.'), 'returns true');
+        else say('Unclear', 'The token returned something unexpected. Treat it as not transferred.', 'returns ' + res.data.slice(0, 18));
       } else {
         v.className = 'verdict rev';
         const name = SIM_ERR[res.data.slice(0, 10).toLowerCase()];
         if (name === 'TransferBlockedByRegGate' && res.data.length >= 138) {
           const c = Number(uint(res.data.slice(10, 74))), st = STATUS[Number(uint(res.data.slice(74, 138)))] || 'unknown';
-          v.append(el('b', null, 'reverts TransferBlockedByRegGate(' + (c < CATS.length ? c : '?') + ', ' + st + ')'));
-          v.append(el('span', 'plain', (CATS[c] ? CATS[c][1] : 'An unknown category') + ' is ' + st + '. ' + t.symbol + (t.strict ? ' is strict, so it moves only on OK.' : ' is lenient, so it stops only on BLOCK.')));
+          say('Would be blocked', (CATS[c] ? CATS[c][1] : 'An unknown category') + ' reads ' + st + '. ' + t.symbol + (t.strict ? ' is strict, so it moves only on OK.' : ' is lenient, so it stops only on BLOCK.'),
+            'reverts TransferBlockedByRegGate(' + (c < CATS.length ? c : '?') + ', ' + st + ')');
         } else if (name === 'InsufficientBalance') {
-          v.append(el('b', null, 'reverts InsufficientBalance()'));
-          v.append(el('span', 'plain', 'The gate let it through; the sender just holds less than that amount.'));
+          say('Gate open, balance too low', 'Reg-Gate let it through, but the sender holds less than that amount.', 'reverts InsufficientBalance()');
         } else if (name === 'ZeroAddress') {
-          v.append(el('b', null, 'reverts ZeroAddress()'));
-          v.append(el('span', 'plain', 'The recipient is the zero address.'));
+          say('Bad recipient', 'Tokens cannot be sent to the zero address.', 'reverts ZeroAddress()');
         } else {
-          v.append(el('b', null, 'reverts'));
-          v.append(el('span', 'plain', 'No reason was returned. Treat as not transferred.'));
+          say('Would fail', 'No reason was returned. Treat it as not transferred.', 'reverts');
         }
       }
       lines.push(v);
@@ -576,7 +595,7 @@
       if (!r) d.append(el('p', 'title quiet', 'Status unreadable. Treat as BLOCK.'));
       else if (!r.last) d.append(el('p', 'title quiet', 'No report yet. Treat as BLOCK.'));
       else if (!r.doc) d.append(el('p', 'title quiet', r.reported === 'OK' ? 'No matching publication in the window.' : 'No document recorded.'));
-      else if (!DOCNUM.test(r.doc)) d.append(el('p', 'title mono', r.doc));
+      else if (!DOCNUM.test(r.doc)) d.append(el('p', 'title' + (placeholderText(r.doc) ? '' : ' mono'), placeholderText(r.doc) || r.doc));
       else {
         const info = titles.get(r.doc), known = info && typeof info === 'object';
         d.append(el('p', 'title' + (known ? '' : ' quiet'), known ? info.title : info === 'pending' ? 'Loading the document title.' : 'Federal Register document'));
@@ -587,8 +606,10 @@
         if (!r.fresh) src.append(' (last report)');
         d.append(src);
       }
-      if (r && r.latched) d.append(el('span', 'flag', 'Latched until a reviewer clears it'));
-      else if (r && !r.fresh && r.last) d.append(el('span', 'flag', 'BLOCK because the report is stale'));
+      if (r && r.latched) {
+        const held = r.latchDoc && r.latchDoc !== r.doc ? ': ' + docShort(r.latchDoc) : '';
+        d.append(el('span', 'flag', 'Held until a reviewer signs off' + held + (r.unreviewed > 1 ? ' (' + r.unreviewed + ' waiting)' : '')));
+      } else if (r && !r.fresh && r.last) d.append(el('span', 'flag', 'Blocked because no update arrived in time'));
       let trail = null;
       if (r && r.last) {
         const btn = el('button', 'whybtn');
@@ -616,7 +637,7 @@
           const box = el('div', 'tok t-' + tone + (a === true ? ' open' : ' shut') + (boardSeen || REDUCED ? '' : ' pre'));
           const txt = el('div');
           txt.append(el('b', null, t.symbol), el('span', 'st', a === true ? 'Transfers open' : a === false ? 'Transfers blocked' : 'Unknown'));
-          const why = a === null || a === undefined ? 'Unreadable, treat as blocked' : t.strict ? 'Strict: moves only on OK' : 'Lenient: stops only on BLOCK';
+          const why = a === null || a === undefined ? 'Unreadable, treat as blocked' : t.strict ? 'Strict: moves only on OK' : 'Lenient: moves unless BLOCK';
           txt.append(el('span', 'why', why));
           box.append(gateSvg(), txt);
           g.append(box);
@@ -652,11 +673,12 @@
       if ((t0 === T_LATCHED || t0 === T_CLEARED) && l.topics.length >= 2) {
         const cat = Number(BigInt(l.topics[1])), doc = b32str(word(l.data, 0)) || 'no document';
         const name = CATS[cat] ? CATS[cat][1] : 'Category ' + cat;
-        if (t0 === T_LATCHED) return { ...base, what: 'BLOCK latched', tone: 'BLOCK', detail: name + ', document ' + doc + '.' };
-        return { ...base, what: 'Reviewer cleared', tone: 'REVIEW', detail: name + ', document ' + doc + '. The workflow re-checks now.' };
+        const docText = placeholderText(doc) ? docShort(doc) : 'document ' + doc;
+        if (t0 === T_LATCHED) return { ...base, what: 'Held for review', tone: 'BLOCK', detail: name + ', ' + docText + '. Blocked until a reviewer signs off.' };
+        return { ...base, what: 'Reviewer signed off', tone: 'REVIEW', detail: name + ', ' + docText + '. The workflow checks again now.' };
       }
       if (t0 === T_PROCESSED && l.data.length >= 66 && BigInt(l.data.slice(0, 66)) === 0n) {
-        return { ...base, what: 'Report rejected', tone: 'BLOCK', detail: 'The contract refused it and nothing changed. The forwarder logged result false.' };
+        return { ...base, what: 'Report rejected', tone: 'BLOCK', detail: 'The contract refused it, so nothing changed. The Chainlink forwarder logged the failure.' };
       }
     } catch { return null; }
     return null;
@@ -700,7 +722,7 @@
       list.replaceChildren();
       if (!events.length) {
         const li = el('li');
-        if (lastReport) li.append(el('span', 't', 'none recent'), el('span', 'w', 'No recent events'), el('span', 'd', 'The last report, ' + fmt(lastReport) + ', is older than the two weeks this list covers.'));
+        if (lastReport) li.append(el('span', 't', 'none recent'), el('span', 'w', 'No recent activity'), el('span', 'd', 'The last report, ' + fmt(lastReport) + ', is older than the two weeks this list covers.'));
         else li.append(el('span', 't', 'none yet'), el('span', 'w', 'No reports yet'));
         list.append(li); return;
       }
@@ -713,7 +735,7 @@
       }
     } catch {
       if (gen !== feedGen) return;
-      const li = el('li'); li.append(el('span', 't', 'unavailable'), el('span', 'w', 'Events unreadable'), el('span', 'd', 'Statuses above come straight from the contract.'));
+      const li = el('li'); li.append(el('span', 't', 'unavailable'), el('span', 'w', 'Activity unreadable'), el('span', 'd', 'The statuses above still come straight from the contract.'));
       list.replaceChildren(li);
       feedKey = null;
     }
@@ -738,14 +760,15 @@
         : kinds.size === 1 && kinds.has('BLOCK') ? (one ? 'is blocked' : 'are blocked') : (one ? 'needs attention' : 'need attention');
       head = nc.length + ' of ' + CATS.length + ' categories ' + verb + '.';
     }
+    const WORD = { OK: 'clear', REVIEW: 'under review', BLOCK: 'blocked', UNKNOWN: 'unreadable' };
     const parts = toks.map((t) => {
       const ci = CATS.findIndex(([k]) => k === t.category);
       const open = tokenOpen(t);
-      const cat = ci >= 0 ? CATS[ci][1].toLowerCase() : 'its category';
+      const cat = ci >= 0 ? 'the ' + CATS[ci][1].toLowerCase() + ' category' : 'its category';
       const st = ci >= 0 ? rows[ci].status : 'UNKNOWN';
-      if (open === true) return t.symbol + ' can still move.';
-      if (open === false) return t.symbol + ' transfers are blocked while ' + cat + ' reads ' + st + '.';
-      return t.symbol + ' could not be checked, so treat it as blocked.';
+      if (open === true) return t.symbol + ' transfers still go through.';
+      if (open === false) return t.symbol + ' is paused while ' + cat + ' is ' + WORD[st] + '.';
+      return t.symbol + ' could not be checked, so treat it as paused.';
     });
     return [head, parts.join(' ') || 'No demo tokens are configured.'];
   }
@@ -836,10 +859,10 @@
 
       if (TEST_RPC) { setLive('bad', 'Test RPC, not live'); setAlert('Reading a local test RPC.', 'These statuses are not the live Sepolia contract.'); }
       else if (!last) { setLive('bad', 'No report yet'); setAlert('No report yet.', 'Every category reads BLOCK until the workflow writes its first report.'); }
-      else if (!fresh) { setLive('bad', 'Stale on Sepolia'); setAlert('Stale, so every transfer is blocked.', 'No fresh report arrived within the freshness limit. That is the fail-closed design working: silence blocks transfers.'); }
-      else { setLive('ok', 'Live on Sepolia'); setAlert(null); }
+      else if (!fresh) { setLive('bad', 'Paused: no update'); setAlert('No update arrived in time, so every transfer is paused.', 'Reports must arrive at least every ' + Math.round(maxAge / 86400) + ' days. This is on purpose: when updates stop, transfers stop.'); }
+      else { setLive('ok', 'Live on testnet'); setAlert(null); }
       if (!last) setHeadline('No report yet.', 'Every category reads BLOCK until the workflow writes its first report.');
-      else if (!fresh) setHeadline('The report is stale, so every transfer is blocked.', 'No fresh report arrived in time. Silence blocks, by design.');
+      else if (!fresh) setHeadline('No update in ' + Math.round(maxAge / 86400) + ' days, so every transfer is paused.', 'That is on purpose: when updates stop, transfers stop until a fresh report arrives.');
       else { const [h, sub] = headlineFor(state); setHeadline(h, sub); }
       $('read-net').textContent = latestBlock ? 'Read at block ' + latestBlock.toLocaleString('en-US') : 'Read from Sepolia';
       $('read-last').textContent = last ? 'last report ' + fmt(last) : 'no report yet';
@@ -850,7 +873,7 @@
       const inDays = left >= 2 * 86400;
       const amount = inDays ? Math.floor(left / 86400) : Math.floor(left / 3600);
       setMetrics({ notClear: rows.filter((r) => r.status !== 'OK').length, blocked: tokens.filter((t) => t.allowed !== true).length, tokens: tokens.length,
-        age: amount, unit: !last ? 'hours, no report yet' : !fresh ? 'hours, already BLOCK' : inDays ? 'days' : amount === 1 ? 'hour' : 'hours' });
+        age: amount, unit: !last ? 'hours, no report yet' : !fresh ? 'hours, already paused' : inDays ? 'days' : amount === 1 ? 'hour' : 'hours' });
     } catch {
       setLive('bad', 'Sepolia unreadable');
       setAlert('Sepolia is unreachable or returned bad data.', 'Showing UNKNOWN rather than guessing, so treat every transfer as blocked. Retrying every minute.');

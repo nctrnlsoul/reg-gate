@@ -25,25 +25,26 @@ var WATCHED_AGENCIES = new Set([
   "national-credit-union-administration"
 ]);
 var AML_AGENCIES = new Set(["financial-crimes-enforcement-network", "foreign-assets-control-office"]);
-var STABLECOIN_TERMS = [/\bstablecoins?\b/, /\bgenius act\b/];
+var STABLECOIN_TERMS = [/\bstable[\s-]?coins?\b/, /\bgenius act\b/];
 var TOKENIZED_TERMS = [
-  /\btokeni[sz](ed|ation)\b/,
-  /\bcrypto asset investment contracts?\b/,
+  /\btokeni[sz](e|es|ed|ing|ation|ations)\b/,
+  /\bcrypto[\s-]?asset investment contracts?\b/,
   /\bsecurity tokens?\b/,
-  /\bdigital asset securit(y|ies)\b/
+  /\bdigital[\s-]+asset securit(y|ies)\b/
 ];
 var SEC_ONLY_TOKENIZED_TERMS = [/\bregulation crypto\b/];
 var SEC = "securities-and-exchange-commission";
 var DIGITAL_ASSET_TERMS = [
-  /\bdigital assets?\b/,
+  /\bdigital[\s-]+assets?\b/,
   /\bcrypto\b/,
-  /\bcrypto[- ]assets?\b/,
-  /\bcryptocurrenc(y|ies)\b/,
-  /\bvirtual currenc(y|ies)\b/,
+  /\bcrypto[\s-]?assets?\b/,
+  /\bcrypto[\s-]?currenc(y|ies)\b/,
+  /\bvirtual[\s-]+currenc(y|ies)\b/,
+  /\bvirtual[\s-]+assets?\b/,
   /\bbitcoin\b/,
-  /\bblockchain\b/,
-  /\bdistributed ledger\b/,
-  /\bdecentralized finance\b/,
+  /\bblock[\s-]?chains?\b/,
+  /\bdistributed[\s-]+ledgers?\b/,
+  /\bdecentralized[\s-]+finance\b/,
   /\bdefi\b/
 ];
 var AML_TERMS = [
@@ -56,7 +57,7 @@ var AML_TERMS = [
   /\bterrorist financing\b/
 ];
 var PROCEDURAL_TITLES = [/^agenda$/, /\bunified agenda\b/, /\bregulatory agenda\b/, /^sunshine act meetings?\b/];
-var SEARCH_TERM = 'stablecoin | stablecoins | "digital asset" | "digital assets" | crypto | cryptocurrency | "virtual currency" | bitcoin | tokenized | tokenization | blockchain | "distributed ledger"';
+var SEARCH_TERM = 'stablecoin | stablecoins | "stable coin" | "digital asset" | "digital assets" | crypto | cryptocurrency | "crypto asset" | "crypto assets" | "virtual currency" | "virtual asset" | "virtual assets" | bitcoin | tokenized | tokenization | tokenizing | blockchain | "distributed ledger"';
 var FIELDS = [
   "document_number",
   "title",
@@ -64,13 +65,16 @@ var FIELDS = [
   "publication_date",
   "effective_on",
   "abstract",
+  "excerpts",
   "agencies"
 ];
 var SRO_TITLE = /^self-regulatory organizations;/;
 var WITHDRAWAL_TITLE = /;\s*withdrawal\.?$/;
-var FINRA = /\bfinancial industry regulatory authority\b/;
-var RELIEF = /\bexempt(ion|ions|ive)?\b|\brelief\b/;
+var FINRA = /\bfinancial industry regulatory authority\b|\bmunicipal securities rulemaking board\b/;
+var SRO_IN_FORCE = /\border (approving|granting)\b|\bimmediate effectiveness\b|\beffective upon filing\b/;
+var RELIEF = /\bexempt(ion|ions|ive)?\b|\brelief\b|\bsafe harbors?\b/;
 var MAX_BLOCK_DOCS = 16;
+var INCOMPLETE_PREFIX = "INCOMPLETE-";
 var EFFECTIVE_HORIZON_DAYS = 366;
 var anyMatch = (patterns, text) => patterns.some((p) => p.test(text));
 var isNonEmptyString = (v) => typeof v === "string" && v.length > 0;
@@ -92,7 +96,7 @@ function parseFederalRegisterResponse(body) {
   if (obj.results === undefined) {
     if (obj.count !== 0)
       throw new Error("FR response missing results with nonzero count");
-    return { count: 0, documents: [] };
+    return { count: 0, documents: [], duplicates: 0 };
   }
   if (!Array.isArray(obj.results))
     throw new Error("FR results is not an array");
@@ -116,6 +120,9 @@ function parseFederalRegisterResponse(body) {
     if (r.abstract !== null && r.abstract !== undefined && typeof r.abstract !== "string") {
       throw new Error(`FR result ${i} has bad abstract`);
     }
+    if (r.excerpts !== null && r.excerpts !== undefined && typeof r.excerpts !== "string") {
+      throw new Error(`FR result ${i} has bad excerpts`);
+    }
     if (!Array.isArray(r.agencies))
       throw new Error(`FR result ${i} missing agencies`);
     const agencySlugs = r.agencies.map((a, j) => {
@@ -131,10 +138,25 @@ function parseFederalRegisterResponse(body) {
       publicationDate: r.publication_date,
       effectiveOn: typeof eff === "string" ? eff : "",
       abstract: typeof r.abstract === "string" ? r.abstract : "",
+      excerpts: typeof r.excerpts === "string" ? cleanExcerpt(r.excerpts) : "",
       agencySlugs
     };
   });
-  return { count: obj.count, documents };
+  const seen = new Set;
+  const unique = [];
+  let duplicates = 0;
+  for (const d of documents) {
+    if (seen.has(d.documentNumber))
+      duplicates++;
+    else {
+      seen.add(d.documentNumber);
+      unique.push(d);
+    }
+  }
+  return { count: obj.count, documents: unique, duplicates };
+}
+function cleanExcerpt(s) {
+  return s.replace(/<[^>]*>/g, " ").replace(/&nbsp;|&#160;/g, " ").replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
 }
 function severityForType(type) {
   switch (type.trim().toLowerCase()) {
@@ -157,7 +179,7 @@ function severityFor(doc, asOfDate) {
 function informationalReason(doc) {
   const title = doc.title.trim().toLowerCase();
   const type = normType(doc);
-  if (type === "notice" && doc.agencySlugs.length > 0 && doc.agencySlugs.every((s) => s === SEC) && SRO_TITLE.test(title) && !FINRA.test(title)) {
+  if (type === "notice" && doc.agencySlugs.length > 0 && doc.agencySlugs.every((s) => s === SEC) && SRO_TITLE.test(title) && !FINRA.test(title) && !SRO_IN_FORCE.test(title) && !anyMatch(TOKENIZED_TERMS, `${title} ${doc.abstract} ${doc.excerpts}`.toLowerCase()) && !anyMatch(SEC_ONLY_TOKENIZED_TERMS, `${title} ${doc.abstract} ${doc.excerpts}`.toLowerCase())) {
     return "sro-filing";
   }
   if (type === "proposed rule" && WITHDRAWAL_TITLE.test(title) && !RELIEF.test(title))
@@ -165,7 +187,7 @@ function informationalReason(doc) {
   return null;
 }
 function categoriesFor(doc) {
-  const text = `${doc.title} ${doc.abstract}`.toLowerCase();
+  const text = `${doc.title} ${doc.abstract} ${doc.excerpts}`.toLowerCase();
   const isStablecoin = anyMatch(STABLECOIN_TERMS, text);
   const isTokenized = anyMatch(TOKENIZED_TERMS, text) || doc.agencySlugs.includes(SEC) && anyMatch(SEC_ONLY_TOKENIZED_TERMS, text);
   const isDigitalAsset = anyMatch(DIGITAL_ASSET_TERMS, text) || isStablecoin || isTokenized;
@@ -194,11 +216,12 @@ function isProcedural(doc) {
 }
 function firstMatch(patterns, doc) {
   const title = doc.title.toLowerCase();
-  const text = `${title} ${doc.abstract.toLowerCase()}`;
+  const abstract = doc.abstract.toLowerCase();
+  const text = `${title} ${abstract} ${doc.excerpts.toLowerCase()}`;
   for (const p of patterns) {
     const m = new RegExp(p.source, p.flags.replace("g", "")).exec(text);
     if (m)
-      return { term: m[0], field: m.index < title.length ? "title" : "abstract" };
+      return { term: m[0], field: m.index < title.length ? "title" : m.index <= title.length + abstract.length ? "abstract" : "excerpt" };
   }
   return null;
 }
@@ -275,11 +298,12 @@ var moreRecent = (a, b, asOfDate) => {
   const eb = eventDate(b, asOfDate);
   return ea !== eb ? ea > eb : a.documentNumber > b.documentNumber;
 };
-var EMPTY = { count: 0, documents: [] };
+var EMPTY = { count: 0, documents: [], duplicates: 0 };
 function classify(published, windowStart, windowEnd, takingEffect = EMPTY, asOfDate = windowEnd, horizon = asOfDate) {
   const statuses = CATEGORIES.map(() => Status.OK);
   const triggers = CATEGORIES.map(() => null);
   const blocking = CATEGORIES.map(() => []);
+  const placeholderTrigger = CATEGORIES.map(() => "");
   let matched = 0;
   let ignored = 0;
   let informational = 0;
@@ -335,26 +359,40 @@ function classify(published, windowStart, windowEnd, takingEffect = EMPTY, asOfD
     }
   }
   const blockDocs = blocking.map((list) => list.slice().sort((a, b) => moreRecent(a, b, asOfDate) ? -1 : moreRecent(b, a, asOfDate) ? 1 : 0).map((d) => d.documentNumber));
-  const total = blockDocs.reduce((n, l) => n + l.length, 0);
-  if (total > MAX_BLOCK_DOCS) {
-    throw new Error(`${total} blocking documents exceed the report cap of ${MAX_BLOCK_DOCS}`);
+  const faulty = (r) => r.count !== r.documents.length || r.duplicates > 0;
+  const truncated = faulty(published) || faulty(takingEffect);
+  const incomplete = CATEGORIES.map(() => truncated);
+  const size = () => blockDocs.reduce((n, l, i) => n + l.length + (incomplete[i] ? 1 : 0), 0);
+  while (size() > MAX_BLOCK_DOCS) {
+    let c = 0;
+    for (let i = 1;i < blockDocs.length; i++)
+      if (blockDocs[i].length > blockDocs[c].length)
+        c = i;
+    incomplete[c] = true;
+    blockDocs[c].pop();
   }
-  const truncated = published.count > published.documents.length || takingEffect.count > takingEffect.documents.length;
-  if (truncated) {
-    for (let i = 0;i < statuses.length; i++)
-      statuses[i] = Status.BLOCK;
-  }
+  const overflow = !truncated && incomplete.some(Boolean);
+  const placeholder = INCOMPLETE_PREFIX + asOfDate;
+  incomplete.forEach((on, i) => {
+    if (!on)
+      return;
+    statuses[i] = Status.BLOCK;
+    blockDocs[i].unshift(placeholder);
+    if (!triggers[i])
+      placeholderTrigger[i] = placeholder;
+  });
   return {
     windowStart,
     windowEnd,
     asOfDate,
     statuses,
-    triggerDocs: triggers.map((d) => d ? d.documentNumber : ""),
+    triggerDocs: triggers.map((d, i) => d ? d.documentNumber : placeholderTrigger[i]),
     blockDocs,
     matched,
     ignored,
     informational,
-    truncated
+    truncated,
+    overflow
   };
 }
 var DAY_MS = 86400000;
@@ -415,7 +453,8 @@ function serializeResult(r) {
     matched: r.matched,
     ignored: r.ignored,
     informational: r.informational,
-    truncated: r.truncated
+    truncated: r.truncated,
+    overflow: r.overflow
   });
 }
 function deserializeResult(s) {
@@ -443,17 +482,20 @@ function deserializeResult(s) {
   });
   if (total > MAX_BLOCK_DOCS)
     throw new Error("too many blockDocs");
+  if (typeof r.truncated !== "boolean" || typeof r.overflow !== "boolean")
+    throw new Error("bad completeness flags");
   return r;
 }
 function summarize(r) {
   const lines = CATEGORIES.map((c, i) => `${c}=${STATUS_NAMES[r.statuses[i]]}${r.triggerDocs[i] ? ` (${r.triggerDocs[i]})` : ""}`);
   const blocking = r.blockDocs.reduce((n, l) => n + l.length, 0);
-  return `window ${r.windowStart}..${r.windowEnd} asOf=${r.asOfDate} blocking=${blocking} matched=${r.matched} ignored=${r.ignored} informational=${r.informational} truncated=${r.truncated} | ${lines.join(" ")}`;
+  return `window ${r.windowStart}..${r.windowEnd} asOf=${r.asOfDate} blocking=${blocking} matched=${r.matched} ignored=${r.ignored} informational=${r.informational} truncated=${r.truncated} overflow=${r.overflow} | ${lines.join(" ")}`;
 }
 export {
   CATEGORIES,
   EFFECTIVE_HORIZON_DAYS,
   FIELDS,
+  INCOMPLETE_PREFIX,
   MAX_BLOCK_DOCS,
   SEARCH_TERM,
   STATUS_NAMES,
@@ -463,6 +505,7 @@ export {
   buildQueryUrl,
   categoriesFor,
   classify,
+  cleanExcerpt,
   computeWindow,
   deserializeResult,
   eventDate,

@@ -2,15 +2,15 @@
 
 [![CI](https://github.com/nctrnlsoul/reg-gate/actions/workflows/ci.yml/badge.svg)](https://github.com/nctrnlsoul/reg-gate/actions/workflows/ci.yml)
 
-**A compliance circuit breaker for tokenized assets.** A Chainlink CRE workflow reads the
-U.S. Federal Register, sorts new federal actions into four asset categories, and writes a
-fail-closed status on-chain. Tokens check it before every transfer, and every blocking
+**A compliance circuit breaker for tokenized assets.** A Chainlink CRE workflow searches the
+U.S. Federal Register for digital asset terms, sorts what it finds into four asset categories,
+and writes a fail-closed status on-chain. Tokens check it before every transfer, and every blocking
 document needs a named human review, recorded on-chain.
 
 - **Live status page:** https://nctrnlsoul.github.io/reg-gate/ (statuses read from the contract on both chains, a transfer simulator, and a "why this status" trail)
 - **Deck (PDF):** https://nctrnlsoul.github.io/reg-gate/Reg-Gate-Deck.pdf
 - **Two chains:** Ethereum Sepolia and Base Sepolia, each report bound to its own chain ID, all contracts verified on Etherscan and Basescan
-- **Tests:** 120 workflow tests, 51 contract tests, and 72 of 72 planted bugs caught (`bun planted-bugs.ts`)
+- **Tests:** 136 workflow tests, 59 contract tests, and 89 of 89 planted bugs caught (`bun planted-bugs.ts`)
 
 > **How it runs today.** The workflow runs in the CRE simulator (`cre workflow simulate --broadcast`):
 > one node runs the compiled workflow and the same capabilities a DON would, and writes real
@@ -30,12 +30,13 @@ Reg-Gate gives that issuer two things:
    on `BLOCK`: a final rule in effect or a presidential action. **Strict** tokens also pause
    on `REVIEW` (a proposal or a pending rule). That suits an issuer that wants to pause during
    any open rulemaking, such as during an offering. Most tokens would be lenient.
-2. **An on-chain review record.** A `BLOCK` stays latched until a named reviewer clears it,
-   one document at a time, by document number. Each clear is a timestamped event on-chain:
-   who reviewed which federal document, and when.
+2. **An on-chain review record.** Every blocking document a report names joins a review queue
+   on-chain, and the category stays `BLOCK` until a named reviewer clears each one, by
+   document number, in order. A document stays queued even after it leaves the search window.
+   Each clear is a timestamped event: who reviewed which federal document, and when.
 
-When Reg-Gate does not know, it blocks. An outage, a bad response, or silence past `maxAge`
-all read as `BLOCK`.
+When Reg-Gate does not know, it blocks. An outage or a bad response writes nothing, and once
+the last report is older than `maxAge` (7 days) every category reads `BLOCK`.
 
 ## How it works
 
@@ -66,26 +67,28 @@ all read as `BLOCK`.
    presidential document is `BLOCK`. A proposal, a notice, or a rule not yet in effect is
    `REVIEW`. An unknown type is `BLOCK`. There is no LLM in the path: its output would differ
    between nodes and break consensus.
-3. **Agree.** Nodes must return byte-identical results, or the run writes nothing.
+3. **Agree.** Nodes must return byte-identical results, or the run writes nothing. (The
+   simulator runs one node in place of the network.)
 4. **Read, then write only if it matters.** For each chain, the workflow reads `snapshot()`
    at the latest and the last finalized block. It skips the write only if both already match
    and the last report is under 24 hours old. Any doubt means write.
 5. **Enforce.** [`GatedToken.sol`](contracts/src/GatedToken.sol) asks the gate before every
    transfer and reverts with `TransferBlockedByRegGate`.
-6. **Review and re-verify.** A reviewer calls `clearLatch(category, document)`. The contract
-   emits `LatchCleared`, and an EVM log trigger re-runs the check at once on either chain.
+6. **Review and re-verify.** A reviewer calls `clearLatch(category, document)` for the
+   document at the front of that category's queue. The contract emits `LatchCleared`, and an
+   EVM log trigger re-runs the check at once on either chain.
 
 ## Chainlink CRE in this project
 
 | Capability | Where | What it does |
 |---|---|---|
-| Cron trigger | [`workflow.ts#L348`](reg-gate-workflow/workflow.ts#L348) | The heartbeat |
-| EVM log trigger | [`workflow.ts#L351`](reg-gate-workflow/workflow.ts#L351) | `LatchCleared` on either chain, at the safe head. The handler refuses other contracts, other events, and reorged logs ([`L324`](reg-gate-workflow/workflow.ts#L324)) |
-| HTTP client + identical consensus | [`workflow.ts#L282`](reg-gate-workflow/workflow.ts#L282) | Both Federal Register queries; nodes must agree byte for byte |
-| DON time | [`workflow.ts#L276`](reg-gate-workflow/workflow.ts#L276) | `runtime.now()` stamps the report, never a node clock |
-| EVM read | [`workflow.ts#L180`](reg-gate-workflow/workflow.ts#L180) | `snapshot()` at latest and finalized, to skip unchanged writes ([`decideWrite`](reg-gate-workflow/workflow.ts#L215)) |
-| Report + EVM write | [`workflow.ts#L233`](reg-gate-workflow/workflow.ts#L233) | Signed report, written per chain, chain ID in the payload |
-| Receiver | [`RegGateStatus.sol#L118`](contracts/src/RegGateStatus.sol#L118) | `onReport`: forwarder only, pinned workflow owner, chain ID, strictly increasing timestamp |
+| Cron trigger | [`workflow.ts#L358`](reg-gate-workflow/workflow.ts#L358) | Every 6 hours once deployed; started by hand in this demo |
+| EVM log trigger | [`workflow.ts#L361`](reg-gate-workflow/workflow.ts#L361) | `LatchCleared` on either chain, at the safe head. The handler refuses other contracts, other events, and reorged logs ([`L334`](reg-gate-workflow/workflow.ts#L334)) |
+| HTTP client + identical consensus | [`workflow.ts#L294`](reg-gate-workflow/workflow.ts#L294) | Both Federal Register queries; nodes must agree byte for byte |
+| DON time | [`workflow.ts#L286`](reg-gate-workflow/workflow.ts#L286) | `runtime.now()` stamps the report, never a node clock |
+| EVM read | [`workflow.ts#L186`](reg-gate-workflow/workflow.ts#L186) | `snapshot()` at latest and finalized, to skip unchanged writes ([`decideWrite`](reg-gate-workflow/workflow.ts#L218)) |
+| Report + EVM write | [`workflow.ts#L257`](reg-gate-workflow/workflow.ts#L257) | Signed report, written per chain, chain ID in the payload. A report the contract rejects counts as a failed delivery ([`L265`](reg-gate-workflow/workflow.ts#L265)) |
+| Receiver | [`RegGateStatus.sol#L137`](contracts/src/RegGateStatus.sol#L137) | `onReport`: forwarder only, chain ID, strictly increasing timestamp, and the pinned workflow owner in production mode |
 | SDK test mocks | [`e2e.test.ts`](reg-gate-workflow/e2e.test.ts) | Real handlers for both triggers against `@chainlink/cre-sdk/test` HTTP and EVM mocks |
 
 ## Proof it runs
@@ -118,7 +121,7 @@ That report set these statuses:
 |---|---|---|
 | Stablecoins | REVIEW | [2026-20729](https://www.federalregister.gov/d/2026-20729) NCUA notice of proposed Call Report changes covering credit unions' payment stablecoin activities |
 | Tokenized securities | REVIEW | [2026-20466](https://www.federalregister.gov/d/2026-20466) SEC proposed crypto custody rules |
-| Digital asset markets | REVIEW | [2026-20888](https://www.federalregister.gov/d/2026-20888) CFTC "Regulation Crypto Asset Transactions and Markets" |
+| Digital asset markets | REVIEW | [2026-20888](https://www.federalregister.gov/d/2026-20888) CFTC advance notice of proposed rulemaking, "Regulation Crypto Asset Transactions and Markets" |
 | AML and sanctions | OK | two FinCEN withdrawals in the window, informational |
 
 So lenient `gUSD` can transfer and strict `gAST` is blocked. The status page always shows the
@@ -128,11 +131,15 @@ contract's current state. Check it yourself with `bun deploy/status.ts` (read-on
 
 | Situation | Result |
 |---|---|
-| API down, bad response, node disagreement | Nothing written. The contract goes stale, then reads `BLOCK` |
+| API down, bad response, node disagreement | Nothing written. After `maxAge` (7 days) the contract reads `BLOCK` |
 | No report, or the last one older than `maxAge` (7 days) | `BLOCK` |
 | Unknown document type, or a final rule with no effective date | `BLOCK` |
-| More results than one page holds | Every category `BLOCK` |
-| Blocking document not yet reviewed | `BLOCK`, through later `OK` reports, until a reviewer clears that exact document |
+| More results than one page holds, or a faulty response | Every category `BLOCK`, plus a dated `INCOMPLETE` entry a reviewer must clear |
+| More blocking documents than one report holds (16) | Those categories `BLOCK`, plus an `INCOMPLETE` entry; the newest documents are listed |
+| Reports stop for more than 14 days, then resume | Every category held until a reviewer clears a `COVERAGE-GAP` entry |
+| Blocking document not yet reviewed | `BLOCK`, through later `OK` reports and after it leaves the window, until a reviewer clears that exact document |
+| More than 64 documents waiting in one category | The report is rejected; the contract keeps reading `BLOCK` |
+| The contract rejects a report | The workflow logs a failed delivery, not a success |
 | Every blocking document reviewed, still in the window | `REVIEW`, never `OK` |
 | Replayed, out-of-order, or other-chain report | Rejected by the contract |
 | On-chain read fails, or latest and finalized disagree | Treated as changed: the report is written |
@@ -142,13 +149,20 @@ Every case is in [ENGINEERING.md](ENGINEERING.md#fail-closed-cases).
 
 ## Known limits
 
-- **Title and abstract only.** A rule that mentions digital assets only deep in its body is missed.
+- **Title, abstract, and search excerpts.** For body text the classifier sees only the short
+  excerpts the Federal Register returns around each search match, not the full document.
 - **Keyword triage, not legal analysis.** Expect false positives and misses. It routes documents to a human.
 - **Publication lookback is 14 days.** Final rules are covered separately, a year ahead.
 - **Run by hand in this demo.** The configured cron is every 6 hours. Until the workflow is
   deployed to a DON, it runs when someone runs the simulator, and `maxAge` (7 days) turns any
   gap past that into `BLOCK`.
 - **Forwarder and gate are immutable.** Changing either means a redeploy. No admin can redirect them.
+- **The owner has instant powers.** The owner can change the pinned workflow owner and the
+  reviewer at once, with no timelock. Production should put both behind a multisig.
+- **Workflow owner, not workflow ID.** In production mode the contract checks who owns the
+  workflow, not which workflow it is. Any workflow from the same owner could write.
+- **Simulation mode is open.** In this demo the simulation forwarder checks no signatures, so
+  anyone can send a report through it. The contract says so on-chain (`simulation() == true`).
 
 ## Run it
 

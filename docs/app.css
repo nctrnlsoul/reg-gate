@@ -247,7 +247,9 @@ h1 { margin: 0; font-size: clamp(36px, 4.6vw, 56px); line-height: 1.06; letter-s
 .verdict { margin-top: 4px; padding: 13px 15px; border-radius: 10px; border: 1px solid var(--hair-2); font-size: 13px; }
 .verdict.okay { border-color: rgba(11,122,75,.3); background: var(--ok-wash); color: var(--ok-ink); }
 .verdict.rev { border-color: rgba(196,43,33,.3); background: var(--block-wash); color: var(--block-ink); }
-.verdict .plain { display: block; margin-top: 6px; font-family: var(--sans); font-size: 14.5px; color: var(--ink); }
+.verdict .vhead { display: block; font: 650 16px/1.3 var(--sans); }
+.verdict .plain { display: block; margin-top: 4px; font-family: var(--sans); font-size: 14.5px; color: var(--ink); }
+.verdict .vcall { display: block; margin-top: 8px; font: 12px/1.5 var(--mono); color: var(--muted); overflow-wrap: anywhere; }
 .out.busy .verdict { opacity: .45; }
 
 /* Networks */
