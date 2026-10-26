@@ -57,7 +57,7 @@
         <tr><td class="cap"><b>EVM log trigger</b><code>EVMClient.logTrigger</code></td><td class="use">A reviewer clearing a latch emits <code>LatchCleared</code>, and the check runs again at once. One listener per chain, at SAFE confidence.</td><td class="ln"><a href="https://github.com/nctrnlsoul/reg-gate/blob/7d1af040d59bef5cc51133305a4976f749311e98/reg-gate-workflow/workflow.ts#L351" target="_blank" rel="noopener noreferrer">workflow.ts:351</a></td><td class="dl"><a href="https://docs.chain.link/cre/reference/sdk/triggers/evm-log-trigger-ts" target="_blank" rel="noopener noreferrer">CRE docs</a></td></tr>
         <tr><td class="cap"><b>HTTP client</b><code>HTTPClient.sendRequest</code></td><td class="use">Each node queries the Federal Register for documents published and taking effect, then classifies them into the four categories.</td><td class="ln"><a href="https://github.com/nctrnlsoul/reg-gate/blob/7d1af040d59bef5cc51133305a4976f749311e98/reg-gate-workflow/workflow.ts#L284" target="_blank" rel="noopener noreferrer">workflow.ts:284</a></td><td class="dl"><a href="https://docs.chain.link/cre/reference/sdk/http-client-ts" target="_blank" rel="noopener noreferrer">CRE docs</a></td></tr>
         <tr><td class="cap"><b>Consensus</b><code>consensusIdenticalAggregation</code></td><td class="use">Signing goes ahead only when a quorum of nodes returns the exact same classified result.</td><td class="ln"><a href="https://github.com/nctrnlsoul/reg-gate/blob/7d1af040d59bef5cc51133305a4976f749311e98/reg-gate-workflow/workflow.ts#L284" target="_blank" rel="noopener noreferrer">workflow.ts:284</a></td><td class="dl"><a href="https://docs.chain.link/cre/reference/sdk/consensus-ts" target="_blank" rel="noopener noreferrer">CRE docs</a></td></tr>
-        <tr><td class="cap"><b>EVM read</b><code>EVMClient.callContract</code></td><td class="use">Reads <code>snapshot()</code> at the latest and the finalized block. An unchanged status skips the write; an unreadable chain always writes.</td><td class="ln"><a href="https://github.com/nctrnlsoul/reg-gate/blob/7d1af040d59bef5cc51133305a4976f749311e98/reg-gate-workflow/workflow.ts#L183" target="_blank" rel="noopener noreferrer">workflow.ts:183</a></td><td class="dl"><a href="https://docs.chain.link/cre/reference/sdk/evm-client-ts" target="_blank" rel="noopener noreferrer">CRE docs</a></td></tr>
+        <tr><td class="cap"><b>EVM read</b><code>EVMClient.callContract</code></td><td class="use">Reads <code>snapshot()</code> at the latest and the finalized block. It skips the write only when both already match and the daily heartbeat is not due; an unreadable chain always writes.</td><td class="ln"><a href="https://github.com/nctrnlsoul/reg-gate/blob/7d1af040d59bef5cc51133305a4976f749311e98/reg-gate-workflow/workflow.ts#L183" target="_blank" rel="noopener noreferrer">workflow.ts:183</a></td><td class="dl"><a href="https://docs.chain.link/cre/reference/sdk/evm-client-ts" target="_blank" rel="noopener noreferrer">CRE docs</a></td></tr>
         <tr><td class="cap"><b>Signed report</b><code>runtime.report</code></td><td class="use">Signs the encoded result. The chain ID sits inside the payload, so a report cannot be replayed on the other chain.</td><td class="ln"><a href="https://github.com/nctrnlsoul/reg-gate/blob/7d1af040d59bef5cc51133305a4976f749311e98/reg-gate-workflow/workflow.ts#L254" target="_blank" rel="noopener noreferrer">workflow.ts:254</a></td><td class="dl"><a href="https://docs.chain.link/cre/guides/workflow/using-evm-client/onchain-write/overview-ts" target="_blank" rel="noopener noreferrer">CRE docs</a></td></tr>
         <tr><td class="cap"><b>EVM write</b><code>EVMClient.writeReport</code></td><td class="use">Delivers the signed report through the forwarder to <code>RegGateStatus</code> on Ethereum Sepolia and Base Sepolia.</td><td class="ln"><a href="https://github.com/nctrnlsoul/reg-gate/blob/7d1af040d59bef5cc51133305a4976f749311e98/reg-gate-workflow/workflow.ts#L256" target="_blank" rel="noopener noreferrer">workflow.ts:256</a></td><td class="dl"><a href="https://docs.chain.link/cre/guides/workflow/using-evm-client/onchain-write/overview-ts" target="_blank" rel="noopener noreferrer">CRE docs</a></td></tr>
       </tbody>
@@ -89,22 +89,23 @@
   </section>
 
   <section class="section" id="integrate">
-    <div class="sh"><h2>Gate a token on a category</h2><p>From contracts/src/GatedToken.sol</p></div>
+    <div class="sh"><h2>Gate a token on a category</h2><p>Excerpt from contracts/src/GatedToken.sol.</p></div>
     <div class="integ">
       <div class="code">
         <div class="chead"><span>Solidity</span><button class="copy" id="copy" type="button">Copy</button></div>
 <pre id="snippet"><span class="k">interface</span> <span class="t">IRegGate</span> {
-    <span class="k">function</span> <span class="f">isAllowed</span>(<span class="t">uint8</span> category, <span class="t">bool</span> strict) <span class="k">external view returns</span> (<span class="t">bool</span>);
     <span class="k">function</span> <span class="f">statusOf</span>(<span class="t">uint8</span> category) <span class="k">external view returns</span> (<span class="t">uint8</span>);
+    <span class="k">function</span> <span class="f">isAllowed</span>(<span class="t">uint8</span> category, <span class="t">bool</span> strict) <span class="k">external view returns</span> (<span class="t">bool</span>);
 }
 
 <span class="k">error</span> <span class="f">TransferBlockedByRegGate</span>(<span class="t">uint8</span> category, <span class="t">uint8</span> status);
 
 <span class="k">function</span> <span class="f">_transfer</span>(<span class="t">address</span> from, <span class="t">address</span> to, <span class="t">uint256</span> value) <span class="k">private</span> {
+    <span class="k">if</span> (to == <span class="t">address</span>(0)) <span class="k">revert</span> <span class="f">ZeroAddress</span>();
     <span class="k">if</span> (!gate.<span class="f">isAllowed</span>(category, strict)) {
         <span class="k">revert</span> <span class="f">TransferBlockedByRegGate</span>(category, gate.<span class="f">statusOf</span>(category));
     }
-    <span class="c">// balance checks and the move, as in any ERC-20</span>
+    <span class="c">// balance check and the move, as in any ERC-20</span>
 }</pre>
       </div>
       <div class="ref"><dl>

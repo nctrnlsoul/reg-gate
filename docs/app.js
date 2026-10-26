@@ -28,6 +28,7 @@
   const T_PROCESSED = '0x3617b009e9785c42daebadb6d3fb553243a4bf586d07ea72d65d80013ce116b5';
   const LOG_CHUNK = 9000;     // stays under free-tier RPC range limits
   const LOG_MAX_CHUNKS = 12;  // about two weeks of Sepolia blocks
+  const LOG_RETRIES = 8;      // per chunk; see getLogsChunked
   const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   const $ = (id) => document.getElementById(id);
@@ -655,7 +656,14 @@
     const out = [];
     for (let f = from; f <= latest; f += LOG_CHUNK) {
       const to = Math.min(f + LOG_CHUNK - 1, latest);
-      const part = await rpc('eth_getLogs', [{ ...filter, fromBlock: '0x' + f.toString(16), toBlock: '0x' + to.toString(16) }], at);
+      // The public RPC is load-balanced and some of its nodes answer "pruned history
+      // unavailable" for ranges others serve. Retry a chunk a few times before giving up.
+      let part, lastErr;
+      for (let attempt = 0; attempt < LOG_RETRIES; attempt++) {
+        try { part = await rpc('eth_getLogs', [{ ...filter, fromBlock: '0x' + f.toString(16), toBlock: '0x' + to.toString(16) }], at); break; }
+        catch (e) { lastErr = e; part = undefined; await wait(250 + attempt * 150); }
+      }
+      if (part === undefined) throw lastErr || new Error('logs unavailable');
       if (!Array.isArray(part)) throw new Error('bad logs');
       out.push(...part.filter((l) => !l.removed));
     }
